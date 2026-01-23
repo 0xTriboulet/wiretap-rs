@@ -1,0 +1,21 @@
+# Rust / Cargo
+/target/
+/**/*.rs.bk
+
+# Rustfmt / Clippy / Tools
+/.rustfmt.toml
+/.clippy.toml
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# Project-specific ignores
+/client_log.txt
+/logs/
+/reference/

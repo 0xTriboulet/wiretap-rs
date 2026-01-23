@@ -1,0 +1,26 @@
+[package]
+name = "wiretap-rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0"
+base64 = "0.22"
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+once_cell = "1.19"
+clap = { version = "4.5", features = ["derive"] }
+hex = "0.4"
+ipnet = { version = "2.9", features = ["serde"] }
+owo-colors = "4.1"
+rand_core = { version = "0.6", features = ["getrandom"] }
+x25519-dalek = { version = "=2.0.0-rc.3", features = ["static_secrets"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_repr = "0.1"
+ureq = "2.9"
+tiny_http = "0.12"
+boringtun = "0.6"
+smoltcp = { version = "0.11", default-features = false, features = ["std", "proto-ipv4", "proto-ipv6", "socket-tcp", "socket-udp", "socket-icmp", "medium-ip"] }
+get_if_addrs = "0.5"
