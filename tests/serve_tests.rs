@@ -174,7 +174,8 @@ Endpoint = 172.16.0.1:51821\n";
     assert!(filtered.relay.peers()[0].allowed_ips()[0].addr().is_ipv4());
     assert!(filtered.e2ee.is_some());
     let e2ee = filtered.e2ee.unwrap();
-    assert!(e2ee.addresses().is_empty());
+    assert_eq!(e2ee.addresses().len(), 1);
+    assert!(e2ee.addresses()[0].addr().is_ipv4());
 }
 
 #[test]
