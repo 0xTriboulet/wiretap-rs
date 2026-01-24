@@ -1,6 +1,6 @@
 # wiretap-rs
 
-[![Release](https://img.shields.io/github/v/release/0xTriboulet/wiretap-rs)](https://github.com/0xTriboulet/wiretap-rs/releases)
+[![Release](https://img.shields.io/github/v/release/0xTriboulet/wiretap-rs?display_name=tag)](https://github.com/0xTriboulet/wiretap-rs/releases)
 [![Build Status](https://github.com/0xTriboulet/wiretap-rs/workflows/Rust/badge.svg)](https://github.com/0xTriboulet/wiretap-rs/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
