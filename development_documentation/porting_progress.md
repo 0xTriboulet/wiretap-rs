@@ -1,7 +1,7 @@
 # Wiretap-RS Porting Progress
 
-**Last Updated:** January 2025  
-**Project Status:** ~95% Feature Complete  
+**Last Updated:** January 24, 2026  
+**Project Status:** ~97% Feature Complete  
 **Production Readiness:** Experimental (requires additional testing and hardening)
 
 ---
@@ -12,6 +12,8 @@ The Rust port of wiretap has achieved substantial feature parity with the Go ref
 
 **Key Achievements:**
 - All 6 CLI commands implemented (`configure`, `serve`, `add`, `expose`, `status`, `ping`)
+- Clipboard support for `configure` and `add server` commands
+- Allocation state persistence across restarts (JSON state file)
 - Complete WireGuard relay + E2EE nested tunnel architecture
 - Multi-peer routing with longest-prefix matching
 - Full API server (7 endpoints) and client
@@ -20,10 +22,8 @@ The Rust port of wiretap has achieved substantial feature parity with the Go ref
 - Localhost IP redirection for host service access
 - Comprehensive test suite (114 tests, 30 test files)
 
-**Remaining Gaps (the 5%):**
-- Clipboard support for `configure` and `add server` commands (non-critical UX feature)
+**Remaining Gaps (the 3%):**
 - API authentication/authorization (security hardening)
-- Server-side state persistence across restarts (operational limitation)
 - Some edge-case error handling refinement (polish)
 - Production-grade logging and observability
 - Performance optimization (buffer pooling, zero-copy paths)
@@ -37,9 +37,9 @@ The Rust port of wiretap has achieved substantial feature parity with the Go ref
 
 | Component | Status | Completion | Notes |
 |-----------|--------|------------|-------|
-| `configure` | ✅ Complete | 98% | All flags working; clipboard support missing |
+| `configure` | ✅ Complete | 100% | All flags working |
 | `serve` | ✅ Complete | 100% | Full relay + E2EE tunnel support |
-| `add server` | ✅ Complete | 95% | File-based and API-based flows; clipboard missing |
+| `add server` | ✅ Complete | 100% | File-based and API-based flows |
 | `add client` | ✅ Complete | 95% | File-based and API-based flows |
 | `expose` | ✅ Complete | 100% | TCP, UDP, and dynamic SOCKS5 forwarding |
 | `status` | ✅ Complete | 95% | Topology tree, network info; formatting differences vs Go |
@@ -105,7 +105,7 @@ The Rust port of wiretap has achieved substantial feature parity with the Go ref
 | `POST /expose` | ✅ Complete | 100% | Add port forwarding rule |
 | `GET /expose` | ✅ Complete | 100% | List active expose rules |
 | `DELETE /expose` | ✅ Complete | 100% | Remove expose rule |
-| In-memory allocation state | ✅ Complete | 100% | Tracks client/server/E2EE address pools |
+| Allocation state persistence | ✅ Complete | 100% | JSON snapshot loaded on startup |
 | API over tunnel | ✅ Complete | 100% | API served through smoltcp, not host socket |
 | Simple mode fallback | ✅ Complete | 100% | API on relay interface when E2EE disabled |
 
@@ -146,7 +146,7 @@ The Rust port of wiretap has achieved substantial feature parity with the Go ref
 | E2EE client allocation | ✅ Complete | 100% | Sequential /24 subnets from 172.19.0.0/16 |
 | API address allocation | ✅ Complete | 100% | Sequential IPs from 192.0.2.0/24 or ::/8 |
 | IPv6 allocation | ✅ Complete | 100% | /48 subnets with fd: prefix |
-| State persistence | ❌ Not Started | 0% | Allocation state resets on restart |
+| State persistence | ✅ Complete | 100% | Allocation state persisted to JSON |
 
 ### Peer Management
 
@@ -169,14 +169,14 @@ This table compares all major features from the Go specification against the Rus
 
 | Feature | Go Spec | Rust Status | Notes |
 |---------|---------|-------------|-------|
-| **CLI: configure** | ✅ | ✅ Complete | Missing clipboard support only |
+| **CLI: configure** | ✅ | ✅ Complete | Full parity |
 | - Endpoint modes | ✅ | ✅ Complete | --endpoint and --outbound-endpoint |
 | - Simple mode | ✅ | ✅ Complete | --simple flag |
 | - Custom subnets | ✅ | ✅ Complete | All subnet flags implemented |
 | - Localhost IP | ✅ | ✅ Complete | --localhost-ip |
 | - Keepalive/MTU | ✅ | ✅ Complete | All timing parameters |
 | - IPv6 disable | ✅ | ✅ Complete | --disable-ipv6 |
-| - Clipboard copy | ✅ | ❌ Not Started | Prints "not implemented" message |
+| - Clipboard copy | ✅ | ✅ Complete | OS clipboard command fallback |
 | **CLI: serve** | ✅ | ✅ Complete | Full feature parity |
 | - Config file parsing | ✅ | ✅ Complete | TOML-like format |
 | - Env var overrides | ✅ | ✅ Complete | WIRETAP_* variables |
@@ -192,14 +192,14 @@ This table compares all major features from the Go specification against the Rus
 | - Keepalive | ✅ | ✅ Complete | Configurable via --keepalive |
 | - --quiet mode | ✅ | ✅ Complete | Suppress all output |
 | - --delete-config | ✅ | ✅ Complete | Remove config after reading |
-| **CLI: add server** | ✅ | ✅ Complete | Minus clipboard |
+| **CLI: add server** | ✅ | ✅ Complete | Full parity |
 | - File-based workflow | ✅ | ✅ Complete | Direct config editing |
 | - API-based workflow | ✅ | ✅ Complete | --server-address |
 | - Endpoint modes | ✅ | ✅ Complete | Inbound and outbound |
 | - Route propagation | ✅ | ✅ Complete | Updates existing servers |
 | - Localhost IP propagation | ✅ | ✅ Complete | Carried to new server |
 | - IPv6 filtering | ✅ | ✅ Complete | Respects disable-ipv6 |
-| - Clipboard copy | ✅ | ❌ Not Started | Not implemented |
+| - Clipboard copy | ✅ | ✅ Complete | OS clipboard command fallback |
 | **CLI: add client** | ✅ | ✅ Complete | Full parity |
 | - File-based workflow | ✅ | ✅ Complete | Config creation |
 | - API-based workflow | ✅ | ✅ Complete | --server-address |
@@ -256,27 +256,15 @@ This table compares all major features from the Go specification against the Rus
 
 ### Not Implemented
 
-1. **Clipboard Support**
-   - **Affected commands:** `configure`, `add server`
-   - **Impact:** Users must manually copy server commands instead of using `--clipboard`
-   - **Technical details:** Requires platform-specific clipboard integration (e.g., `arboard` crate)
-   - **Workaround:** Pipe output to clipboard tool manually: `wiretap configure ... | xclip` or `| pbcopy`
-
-2. **API Authentication**
+1. **API Authentication**
    - **Status:** API endpoints are completely unauthenticated
    - **Impact:** Anyone with tunnel access can manage the wiretap network
    - **Go implementation:** Also lacks authentication (not a regression)
    - **Security implication:** Production deployments should use firewall rules to restrict API access
 
-3. **Allocation State Persistence**
-   - **Status:** Address allocation state is in-memory only
-   - **Impact:** Server restart resets allocation counters, may cause address conflicts
-   - **Workaround:** Avoid restarting servers with active clients, or regenerate all configs
-   - **Priority:** Medium (needed for production stability)
-
 ### Simplified/Different Implementations
 
-4. **TCP Proxy Architecture**
+2. **TCP Proxy Architecture**
    - **Go:** Full in-stack TCP proxy using gVisor netstack
    - **Rust:** smoltcp for tunnel-side TCP state, bridges to OS `TcpStream` for host connections
    - **Implications:**
@@ -285,7 +273,7 @@ This table compares all major features from the Go specification against the Rus
      - OS-level firewall rules still apply to host connections
    - **Status:** Works correctly in practice; no known issues
 
-5. **Status Tree Formatting**
+3. **Status Tree Formatting**
    - **Go:** Tree drawing uses specific Unicode box characters and spacing
    - **Rust:** Tree structure is logically correct but formatting details differ
    - **Impact:** Visual output not identical to Go version
@@ -546,7 +534,6 @@ This table compares all major features from the Go specification against the Rus
 - IPv6-only networks (tested with dual-stack only)
 - MTU edge cases (jumbo frames, fragmentation)
 - Malformed packet handling (fuzzing)
-- Clipboard functionality (not implemented)
 
 ### Test Types
 
@@ -669,10 +656,9 @@ cargo test --quiet
 2. **✅ DONE: Implement all API endpoints**
    - Status: All 7 endpoints complete
 
-3. **⬜ Add clipboard support** (Low effort, high user impact)
+3. **✅ DONE: Add clipboard support** (Low effort, high user impact)
    - Commands: `configure --clipboard`, `add server --clipboard`
-   - Suggested crate: `arboard` (cross-platform)
-   - Estimated effort: 4-8 hours
+   - Notes: OS clipboard command fallbacks (pbcopy/clip/xclip/wl-copy)
 
 4. **⬜ Interoperability testing** (Critical for production)
    - Test Rust client ↔ Go server
@@ -683,11 +669,9 @@ cargo test --quiet
 
 ### Medium Priority (Production Readiness)
 
-5. **⬜ Allocation state persistence**
-   - Store allocation state to file (JSON/TOML)
-   - Load state on startup
+5. **✅ DONE: Allocation state persistence**
+   - Allocation state stored to JSON and loaded on startup
    - Prevents address conflicts after restart
-   - Estimated effort: 1-2 days
 
 6. **⬜ Improve error handling**
    - Better error messages for common failures (firewall, NAT, endpoint unreachable)
@@ -749,11 +733,11 @@ cargo test --quiet
 **Milestone 1: Feature Complete (95% → 100%)**
 - ✅ All CLI commands working
 - ✅ All API endpoints working
-- ⬜ Clipboard support added
+- ✅ Clipboard support added
 - ⬜ Interoperability tested
 
 **Milestone 2: Production Ready (Beta)**
-- ⬜ Allocation state persistence
+- ✅ Allocation state persistence
 - ⬜ Comprehensive error handling
 - ⬜ Load testing complete
 - ⬜ Security audit complete
@@ -942,6 +926,17 @@ cargo test --quiet
 - Added detailed tracing logs for SYN reception, host connection, and packet emission
 - `serve` now injects default E2EE interface addresses (172.18.0.2/32 + fd:18::2/128) when missing
 - smoltcp interface address list now includes `LocalhostIP` for DNAT acceptance
+
+**Clipboard support (Jan 24, 2026):**
+- Added clipboard helper with OS command fallbacks (pbcopy/clip/wl-copy/xclip/xsel).
+- `configure` and `add server` now copy POSIX server commands and report success/failure.
+- Added unit tests for clipboard command ordering and retry behavior.
+
+**Allocation state persistence (Jan 24, 2026):**
+- Added JSON allocation state snapshots with atomic writes.
+- Server loads allocation state on startup and advances counters from persisted state.
+- Default state file is `<config>.state.json`; override via `WIRETAP_ALLOCATION_STATE`.
+- Added tests covering persistence across restarts and state file creation.
 
 ---
 

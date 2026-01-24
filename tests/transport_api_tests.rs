@@ -1,5 +1,8 @@
 use std::net::IpAddr;
+use std::path::PathBuf;
 use std::sync::mpsc;
+use std::time::{SystemTime, UNIX_EPOCH};
+use wiretap_rs::constants::{increment_v4, increment_v6};
 use wiretap_rs::transport::api::{
     ApiMessage, ApiRequest, ApiResponse, ApiService, ExposeAction, ExposeCommand, ExposeRequest,
     ExposeTuple, InterfaceType, PeerType, ServerConfigs,
@@ -9,6 +12,20 @@ fn serialize(req: ApiRequest) -> ApiMessage {
     ApiMessage {
         payload: serde_json::to_vec(&req).expect("serialize"),
     }
+}
+
+fn temp_state_path(label: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time")
+        .as_nanos();
+    let mut path = std::env::temp_dir();
+    path.push(format!(
+        "wiretap_alloc_state_{label}_{}_{}.json",
+        std::process::id(),
+        nanos
+    ));
+    path
 }
 
 #[test]
@@ -236,6 +253,81 @@ fn server_info_allows_relay_only() {
         }
         _ => panic!("wrong response"),
     }
+}
+
+#[test]
+fn allocation_state_persists_across_restarts() {
+    let path = temp_state_path("persist");
+    let mut service = ApiService::new();
+    service
+        .set_allocation_state_path(&path)
+        .expect("set path");
+
+    let first = service
+        .handle_message(serialize(ApiRequest::Allocate(PeerType::Server)))
+        .expect("allocate");
+    let first_state = match first {
+        ApiResponse::Allocated(state) => state,
+        other => panic!("unexpected response: {:?}", other),
+    };
+    drop(service);
+
+    let mut service = ApiService::new();
+    service
+        .set_allocation_state_path(&path)
+        .expect("load path");
+
+    let second = service
+        .handle_message(serialize(ApiRequest::Allocate(PeerType::Server)))
+        .expect("allocate");
+    let second_state = match second {
+        ApiResponse::Allocated(state) => state,
+        other => panic!("unexpected response: {:?}", other),
+    };
+
+    assert_eq!(
+        second_state.next_server_relay_addr4,
+        increment_v4(first_state.next_server_relay_addr4, 1)
+    );
+    assert_eq!(
+        second_state.next_server_relay_addr6,
+        increment_v6(first_state.next_server_relay_addr6, 1)
+    );
+    assert_eq!(
+        second_state.next_server_e2ee_addr4,
+        increment_v4(first_state.next_server_e2ee_addr4, 1)
+    );
+    assert_eq!(
+        second_state.next_server_e2ee_addr6,
+        increment_v6(first_state.next_server_e2ee_addr6, 1)
+    );
+    assert_eq!(
+        second_state.api_addr,
+        match first_state.api_addr {
+            IpAddr::V4(addr) => IpAddr::V4(increment_v4(addr, 1)),
+            IpAddr::V6(addr) => IpAddr::V6(increment_v6(addr, 1)),
+        }
+    );
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn allocation_state_creates_file_on_allocate() {
+    let path = temp_state_path("create");
+    let mut service = ApiService::new();
+    service
+        .set_allocation_state_path(&path)
+        .expect("set path");
+
+    service
+        .handle_message(serialize(ApiRequest::Allocate(PeerType::Client)))
+        .expect("allocate");
+
+    let metadata = std::fs::metadata(&path).expect("state file");
+    assert!(metadata.len() > 0);
+
+    let _ = std::fs::remove_file(&path);
 }
 
 #[test]

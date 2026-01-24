@@ -14,6 +14,7 @@ use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -33,6 +34,7 @@ pub struct ServeOptions {
     pub keepalive_idle_secs: u64,
     pub keepalive_interval_secs: u64,
     pub keepalive_count: u32,
+    pub allocation_state_path: Option<PathBuf>,
 }
 
 impl Default for ServeOptions {
@@ -50,6 +52,7 @@ impl Default for ServeOptions {
             keepalive_idle_secs: constants::DEFAULT_KEEPALIVE_IDLE_SECS,
             keepalive_interval_secs: constants::DEFAULT_KEEPALIVE_INTERVAL_SECS,
             keepalive_count: constants::DEFAULT_KEEPALIVE_COUNT,
+            allocation_state_path: None,
         }
     }
 }
@@ -85,6 +88,24 @@ impl From<HashMap<String, String>> for ServerEnv {
     fn from(values: HashMap<String, String>) -> Self {
         Self { values }
     }
+}
+
+pub(crate) fn resolve_allocation_state_path(
+    config_file: Option<&str>,
+    env: &ServerEnv,
+) -> Option<PathBuf> {
+    if let Some(value) = env.get("WIRETAP_ALLOCATION_STATE") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed));
+        }
+        return None;
+    }
+    let config = config_file?;
+    if config.trim().is_empty() {
+        return None;
+    }
+    Some(Path::new(config).with_extension("state.json"))
 }
 
 pub fn load_server_config(file_contents: Option<&str>, env: &ServerEnv) -> Result<ServerConfig> {
@@ -448,7 +469,7 @@ pub fn run_loop(
         run_e2ee_over_relay(config, bind_addr, options)
     } else {
         let tunnel = build_relay_tunnel(config, bind_addr)?;
-        let service = build_api_service(config, Some(tunnel.clone()), None);
+        let service = build_api_service(config, Some(tunnel.clone()), None, options)?;
         run_wireguard_smoltcp_with_tunnel(config, tunnel, options, Some(service))
     }
 }
@@ -549,7 +570,8 @@ fn build_api_service(
     config: &ServerConfig,
     relay_tunnel: Option<Arc<Mutex<MultiPeerTunnel>>>,
     e2ee_tunnel: Option<Arc<Mutex<MultiPeerSession>>>,
-) -> Arc<Mutex<ApiService>> {
+    options: &ServeOptions,
+) -> Result<Arc<Mutex<ApiService>>> {
     let mut service = ApiService::with_configs(Some(config.relay.clone()), config.e2ee.clone())
         .with_interfaces(crate::transport::api::collect_host_interfaces());
     if let Some(tunnel) = relay_tunnel {
@@ -558,7 +580,10 @@ fn build_api_service(
     if let Some(tunnel) = e2ee_tunnel {
         service = service.with_e2ee_tunnel(tunnel);
     }
-    Arc::new(Mutex::new(service))
+    if let Some(path) = options.allocation_state_path.as_ref() {
+        service.set_allocation_state_path(path)?;
+    }
+    Ok(Arc::new(Mutex::new(service)))
 }
 
 #[allow(dead_code)]
@@ -727,7 +752,8 @@ fn run_e2ee_over_relay(
         config,
         Some(relay_tunnel.clone()),
         Some(e2ee_tunnel.clone()),
-    );
+        options,
+    )?;
     run_e2ee_smoltcp_with_tunnel(
         config,
         relay_tunnel,

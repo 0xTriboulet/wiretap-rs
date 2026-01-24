@@ -32,6 +32,7 @@ Wiretap runs a **relay** WireGuard interface and an optional nested **E2EE** (En
   - ICMP echo is handled by crafting replies when the system ping succeeds
 - **API over tunnel**: The HTTP API is served via the tunnel address, not a host-bound socket
 - **Expose**: TCP/UDP/Dynamic (SOCKS5) exposure is implemented via the API and routed through the tunnel
+- **Allocation state persistence**: Address allocation counters are stored in `<config>.state.json` (override with `WIRETAP_ALLOCATION_STATE`)
 
 ## Installation
 
@@ -106,6 +107,7 @@ The binary is emitted at `target/debug/wiretap-rs` (or `target/release/wiretap-r
 The `configure` command generates client configurations and a server configuration file.
 
 Default ports are 51820 (relay) and 51821 (E2EE). You can override the server relay port with `--sport` or by setting the port in `--endpoint`/`--outbound-endpoint`.
+Add `--clipboard` to copy the generated POSIX server command to your system clipboard.
 
 **Typical inbound connection (Client connects to Server):**
 
@@ -136,6 +138,11 @@ wiretap-rs serve -f wiretap_server.conf
 ```bash
 wiretap-rs serve -f wiretap_server.conf --quiet
 ```
+
+**Allocation state file (address persistence):**
+
+By default, the server writes allocation state to `wiretap_server.state.json` next to your config.
+Override the location with `WIRETAP_ALLOCATION_STATE=/path/to/state.json`.
 
 ### Bring Up the Client
 

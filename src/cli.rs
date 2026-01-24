@@ -1,3 +1,4 @@
+use crate::clipboard;
 use crate::constants;
 use crate::peer::{
     Config, ConfigArgs, PeerConfigArgs, Shell, create_server_command, create_server_file,
@@ -524,23 +525,26 @@ fn configure(mut args: ConfigureArgs) -> Result<()> {
         )
     };
 
+    let server_command_posix = create_server_command(
+        &server_config_relay,
+        &server_config_e2ee,
+        Shell::Posix,
+        args.simple,
+        args.disable_ipv6,
+    );
+    let server_command_powershell = create_server_command(
+        &server_config_relay,
+        &server_config_e2ee,
+        Shell::PowerShell,
+        args.simple,
+        args.disable_ipv6,
+    );
+
     let server_payload = format!(
         "{}\n\n# POSIX Shell: {}\n\n# Powershell: {}\n",
         create_server_file(&server_config_relay, &server_config_e2ee, args.simple),
-        create_server_command(
-            &server_config_relay,
-            &server_config_e2ee,
-            Shell::Posix,
-            args.simple,
-            args.disable_ipv6
-        ),
-        create_server_command(
-            &server_config_relay,
-            &server_config_e2ee,
-            Shell::PowerShell,
-            args.simple,
-            args.disable_ipv6
-        )
+        server_command_posix,
+        server_command_powershell
     );
 
     let server_status = write_secure_file(&server_output, &server_payload)
@@ -588,36 +592,30 @@ fn configure(mut args: ConfigureArgs) -> Result<()> {
     println!(
         "{} {}",
         "POSIX Shell:".cyan(),
-        create_server_command(
-            &server_config_relay,
-            &server_config_e2ee,
-            Shell::Posix,
-            args.simple,
-            args.disable_ipv6
-        )
-        .green()
+        server_command_posix.green()
     );
     println!(
         "{} {}",
         "PowerShell:".cyan(),
-        create_server_command(
-            &server_config_relay,
-            &server_config_e2ee,
-            Shell::PowerShell,
-            args.simple,
-            args.disable_ipv6
-        )
-        .green()
+        server_command_powershell.green()
     );
     println!("{} {}", "Config File:".cyan(), server_config_cmd.green());
     println!();
 
     if args.clipboard {
-        println!(
-            "{} {}",
-            "clipboard:".bold().yellow(),
-            "not implemented yet".yellow()
-        );
+        let status = match clipboard::copy_to_clipboard(&server_command_posix) {
+            Ok(()) => format!(
+                "{} {}",
+                "clipboard:".bold().green(),
+                "successfully copied".green()
+            ),
+            Err(err) => format!(
+                "{} {}",
+                "clipboard:".bold().red(),
+                format!("error copying to clipboard: {err}").red()
+            ),
+        };
+        println!("{status}");
         println!();
     }
 
@@ -638,6 +636,8 @@ fn serve(args: ServeArgs) -> Result<()> {
         None => None,
     };
     let disable_ipv6 = args.disable_ipv6 || env.get_bool("WIRETAP_DISABLEIPV6").unwrap_or(false);
+    let allocation_state_path =
+        crate::serve::resolve_allocation_state_path(args.config_file.as_deref(), &env);
     let options = crate::serve::ServeOptions {
         simple: args.simple,
         quiet: args.quiet,
@@ -651,6 +651,7 @@ fn serve(args: ServeArgs) -> Result<()> {
         keepalive_idle_secs: args.keepalive_idle_secs,
         keepalive_interval_secs: args.keepalive_interval_secs,
         keepalive_count: args.keepalive_count,
+        allocation_state_path,
     };
     let config = crate::serve::apply_serve_options(config, options.clone())?;
 
@@ -1129,11 +1130,19 @@ fn add_server(args: AddServerCliArgs) -> Result<()> {
     println!();
 
     if args.clipboard {
-        println!(
-            "{} {}",
-            "clipboard:".bold().yellow(),
-            "not implemented yet".yellow()
-        );
+        let status = match clipboard::copy_to_clipboard(&plan.server_command_posix) {
+            Ok(()) => format!(
+                "{} {}",
+                "clipboard:".bold().green(),
+                "successfully copied".green()
+            ),
+            Err(err) => format!(
+                "{} {}",
+                "clipboard:".bold().red(),
+                format!("error copying to clipboard: {err}").red()
+            ),
+        };
+        println!("{status}");
         println!();
     }
 
