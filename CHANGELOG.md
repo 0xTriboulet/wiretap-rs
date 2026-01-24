@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-01-24
+
+### Changed
+- Allocation state persistence is now opt-in via `WIRETAP_ALLOCATION_STATE` environment variable
+- Improved server configuration with clearer defaults for state management
+
+### Added
+- Documentation for allocation state persistence configuration
+- Enhanced test coverage for allocation state functionality
+
 ## [0.1.1] - 2026-01-24
 
 ### Fixed
@@ -41,5 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - No systemd units or automatic firewall/NAT setup
 - Potential edge-case differences in TCP/UDP handling compared to gVisor
 
+[0.2.0]: https://github.com/0xTriboulet/wiretap-rs/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/0xTriboulet/wiretap-rs/releases/tag/v0.1.1
 [0.1.0]: https://github.com/0xTriboulet/wiretap-rs/releases/tag/v0.1.0
