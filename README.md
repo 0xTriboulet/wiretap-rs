@@ -1,5 +1,9 @@
 # wiretap-rs
 
+[![Release](https://img.shields.io/github/v/release/0xTriboulet/wiretap-rs)](https://github.com/0xTriboulet/wiretap-rs/releases)
+[![Build Status](https://github.com/0xTriboulet/wiretap-rs/workflows/Rust/badge.svg)](https://github.com/0xTriboulet/wiretap-rs/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 **wiretap-rs** is a Rust port of [Wiretap](https://github.com/sandialabs/wiretap), a transparent, VPN-like proxy server that tunnels traffic via WireGuard and requires no special privileges to run.
 
 This project aims to achieve functional parity with the original Go implementation while maintaining idiomatic Rust code and a test-driven development approach. The implementation works both as a library that can be integrated into other Rust projects via `cargo add wiretap-rs`, and as a stand-alone command-line application.
@@ -30,6 +34,47 @@ Wiretap runs a **relay** WireGuard interface and an optional nested **E2EE** (En
   - ICMP echo is handled by crafting replies when the system ping succeeds
 - **API over tunnel**: The HTTP API is served via the tunnel address, not a host-bound socket
 - **Expose**: TCP/UDP/Dynamic (SOCKS5) exposure is implemented via the API and routed through the tunnel
+
+## Installation
+
+### Pre-built Binaries
+
+Download pre-built binaries for your platform from the [Releases page](https://github.com/0xTriboulet/wiretap-rs/releases).
+
+Available platforms:
+- Linux (x86_64, aarch64)
+- macOS (x86_64, aarch64)
+- Windows (x86_64)
+
+### Building from Source
+
+**Prerequisites:** Rust toolchain (stable). Install from [https://rustup.rs/](https://rustup.rs/)
+
+```bash
+# Clone the repository
+git clone https://github.com/0xTriboulet/wiretap-rs.git
+cd wiretap-rs
+
+# Build the project
+cargo build --release
+
+# The binary will be at target/release/wiretap-rs
+```
+
+### Using as a Library
+
+Add wiretap-rs to your Rust project:
+
+```bash
+cargo add wiretap-rs
+```
+
+Or add to your `Cargo.toml`:
+
+```toml
+[dependencies]
+wiretap-rs = "0.1"
+```
 
 ## Getting Started
 
