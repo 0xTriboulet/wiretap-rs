@@ -12,8 +12,6 @@ This project aims to achieve functional parity with the original Go implementati
 
 Wiretap is a transparent, VPN-like proxy server that tunnels traffic via WireGuard and requires no special privileges to run.
 
-In this diagram, the Client has generated and installed WireGuard configuration files that will route traffic destined for `10.0.0.0/24` through a WireGuard interface. Wiretap is then deployed to the Server with a configuration that connects to the Client as a WireGuard peer. The Client can then interact with local network resources as if on the same network as the Server, and optionally chain additional Servers to reach new networks. Access to the Wiretap network can also be shared with other Clients.
-
 ### Terminology
 
 **Wiretap Server**: A machine where the Wiretap binary is running the `serve` command. Servers receive and relay network traffic on behalf of Wiretap Clients, acting like a VPN "exit node."
