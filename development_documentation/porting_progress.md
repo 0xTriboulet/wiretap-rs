@@ -20,9 +20,11 @@ The Rust port of wiretap has achieved substantial feature parity with the Go ref
 - Localhost IP redirection for host service access
 - Comprehensive test suite (114 tests, 30 test files)
 
-**Remaining Gaps:**
-- Clipboard support for `configure` and `add server` commands
-- Some edge-case error handling refinement
+**Remaining Gaps (the 5%):**
+- Clipboard support for `configure` and `add server` commands (non-critical UX feature)
+- API authentication/authorization (security hardening)
+- Server-side state persistence across restarts (operational limitation)
+- Some edge-case error handling refinement (polish)
 - Production-grade logging and observability
 - Performance optimization (buffer pooling, zero-copy paths)
 - Security hardening (API authentication, rate limiting)
