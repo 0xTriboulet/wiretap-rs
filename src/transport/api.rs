@@ -14,6 +14,7 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
@@ -124,6 +125,24 @@ impl Default for NetworkState {
             server_relay_subnet6: relay6.network(),
         }
     }
+}
+
+const ALLOCATION_STATE_VERSION: u8 = 1;
+
+fn allocation_state_version() -> u8 {
+    ALLOCATION_STATE_VERSION
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct AllocationSnapshot {
+    #[serde(default = "allocation_state_version")]
+    version: u8,
+    next_state: NetworkState,
+    client_addresses: HashMap<u64, NetworkState>,
+    server_addresses: HashMap<u64, NetworkState>,
+    next_client_index: u64,
+    next_server_index: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -249,6 +268,7 @@ pub struct ApiService {
     next_server_index: u64,
     relay_tunnel: Option<Arc<Mutex<MultiPeerTunnel>>>,
     e2ee_tunnel: Option<Arc<Mutex<MultiPeerSession>>>,
+    allocation_state_path: Option<PathBuf>,
 }
 
 struct ExposeHandle {
@@ -302,6 +322,14 @@ impl ApiService {
     pub fn with_e2ee_tunnel(mut self, tunnel: Arc<Mutex<MultiPeerSession>>) -> Self {
         self.e2ee_tunnel = Some(tunnel);
         self
+    }
+
+    pub fn set_allocation_state_path<P: AsRef<std::path::Path>>(
+        &mut self,
+        path: P,
+    ) -> Result<()> {
+        self.allocation_state_path = Some(path.as_ref().to_path_buf());
+        self.load_allocation_state()
     }
 
     pub fn handle_message(&mut self, message: ApiMessage) -> Result<ApiResponse> {
@@ -434,6 +462,10 @@ impl ApiService {
 
     fn handle_allocate(&mut self, peer_type: PeerType) -> Result<ApiResponse> {
         // Return current state and advance counters by one
+        let previous = self
+            .allocation_state_path
+            .as_ref()
+            .map(|_| self.snapshot());
         let state = self.next_state.clone();
         match peer_type {
             PeerType::Server => {
@@ -466,6 +498,12 @@ impl ApiService {
                 self.client_addresses.insert(index, state.clone());
                 self.next_client_index = self.next_client_index.saturating_add(1);
             }
+        }
+        if let Err(err) = self.save_allocation_state() {
+            if let Some(snapshot) = previous {
+                self.apply_snapshot(snapshot);
+            }
+            return Err(err);
         }
         Ok(ApiResponse::Allocated(state))
     }
@@ -594,6 +632,77 @@ impl ApiService {
             IpAddr::V6(addr) => IpAddr::V6(increment_v6(addr, 1)),
         };
     }
+
+    fn load_allocation_state(&mut self) -> Result<()> {
+        let Some(path) = self.allocation_state_path.as_ref() else {
+            return Ok(());
+        };
+        let contents = match std::fs::read_to_string(path) {
+            Ok(contents) => contents,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(err) => return Err(err.into()),
+        };
+        let snapshot: AllocationSnapshot = serde_json::from_str(&contents)
+            .map_err(|err| anyhow!("failed to parse allocation state: {err}"))?;
+        if snapshot.version != ALLOCATION_STATE_VERSION {
+            return Err(anyhow!(
+                "unsupported allocation state version {}",
+                snapshot.version
+            ));
+        }
+        self.apply_snapshot(snapshot);
+        Ok(())
+    }
+
+    fn save_allocation_state(&self) -> Result<()> {
+        let Some(path) = self.allocation_state_path.as_ref() else {
+            return Ok(());
+        };
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+        let snapshot = self.snapshot();
+        let payload = serde_json::to_vec_pretty(&snapshot)?;
+        write_atomic(path, &payload)?;
+        Ok(())
+    }
+
+    fn apply_snapshot(&mut self, snapshot: AllocationSnapshot) {
+        self.next_state = snapshot.next_state;
+        self.client_addresses = snapshot.client_addresses;
+        self.server_addresses = snapshot.server_addresses;
+        self.next_client_index = snapshot.next_client_index;
+        self.next_server_index = snapshot.next_server_index;
+    }
+
+    fn snapshot(&self) -> AllocationSnapshot {
+        AllocationSnapshot {
+            version: ALLOCATION_STATE_VERSION,
+            next_state: self.next_state.clone(),
+            client_addresses: self.client_addresses.clone(),
+            server_addresses: self.server_addresses.clone(),
+            next_client_index: self.next_client_index,
+            next_server_index: self.next_server_index,
+        }
+    }
+}
+
+fn write_atomic(path: &std::path::Path, payload: &[u8]) -> Result<()> {
+    let mut tmp_os = std::ffi::OsString::from(path.as_os_str());
+    tmp_os.push(".tmp");
+    let tmp_path = std::path::PathBuf::from(tmp_os);
+    {
+        let mut file = std::fs::File::create(&tmp_path)?;
+        file.write_all(payload)?;
+        file.sync_all()?;
+    }
+    if std::fs::rename(&tmp_path, path).is_err() {
+        let _ = std::fs::remove_file(path);
+        std::fs::rename(&tmp_path, path)?;
+    }
+    Ok(())
 }
 
 pub fn collect_host_interfaces() -> Vec<HostInterface> {
