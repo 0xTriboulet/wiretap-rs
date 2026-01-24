@@ -13,7 +13,7 @@ The Rust port of wiretap has achieved substantial feature parity with the Go ref
 **Key Achievements:**
 - All 6 CLI commands implemented (`configure`, `serve`, `add`, `expose`, `status`, `ping`)
 - Clipboard support for `configure` and `add server` commands
-- Allocation state persistence across restarts (JSON state file)
+- Allocation state persistence across restarts (opt-in JSON state file)
 - Complete WireGuard relay + E2EE nested tunnel architecture
 - Multi-peer routing with longest-prefix matching
 - Full API server (7 endpoints) and client
@@ -933,9 +933,8 @@ cargo test --quiet
 - Added unit tests for clipboard command ordering and retry behavior.
 
 **Allocation state persistence (Jan 24, 2026):**
-- Added JSON allocation state snapshots with atomic writes.
+- Added JSON allocation state snapshots with atomic writes (opt-in via `WIRETAP_ALLOCATION_STATE`).
 - Server loads allocation state on startup and advances counters from persisted state.
-- Default state file is `<config>.state.json`; override via `WIRETAP_ALLOCATION_STATE`.
 - Added tests covering persistence across restarts and state file creation.
 
 ---

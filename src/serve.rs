@@ -14,7 +14,7 @@ use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -94,6 +94,7 @@ pub(crate) fn resolve_allocation_state_path(
     config_file: Option<&str>,
     env: &ServerEnv,
 ) -> Option<PathBuf> {
+    let _ = config_file;
     if let Some(value) = env.get("WIRETAP_ALLOCATION_STATE") {
         let trimmed = value.trim();
         if !trimmed.is_empty() {
@@ -101,11 +102,7 @@ pub(crate) fn resolve_allocation_state_path(
         }
         return None;
     }
-    let config = config_file?;
-    if config.trim().is_empty() {
-        return None;
-    }
-    Some(Path::new(config).with_extension("state.json"))
+    None
 }
 
 pub fn load_server_config(file_contents: Option<&str>, env: &ServerEnv) -> Result<ServerConfig> {
@@ -1283,7 +1280,10 @@ pub fn build_relay_tunnel(
 
 #[cfg(test)]
 mod tests {
-    use super::{ServeOptions, api_bind_addr, collect_smoltcp_addresses, localhost_mapping};
+    use super::{
+        ServeOptions, api_bind_addr, collect_smoltcp_addresses, localhost_mapping,
+        resolve_allocation_state_path,
+    };
     use crate::peer::{Config, ServerConfig};
     use std::net::{IpAddr, Ipv4Addr};
 
@@ -1334,5 +1334,27 @@ mod tests {
         let options = ServeOptions::default();
         let addrs = collect_smoltcp_addresses(&config, &options);
         assert!(addrs.contains(&IpAddr::V4(Ipv4Addr::new(10, 0, 0, 123))));
+    }
+
+    #[test]
+    fn allocation_state_path_is_opt_in() {
+        let env = crate::serve::ServerEnv::from(std::collections::HashMap::new());
+        let path = resolve_allocation_state_path(Some("wiretap_server.conf"), &env);
+        assert!(path.is_none());
+    }
+
+    #[test]
+    fn allocation_state_path_uses_env_override() {
+        let mut values = std::collections::HashMap::new();
+        values.insert(
+            "WIRETAP_ALLOCATION_STATE".to_string(),
+            "/tmp/wiretap_state.json".to_string(),
+        );
+        let env = crate::serve::ServerEnv::from(values);
+        let path = resolve_allocation_state_path(Some("wiretap_server.conf"), &env);
+        assert_eq!(
+            path.unwrap().to_string_lossy(),
+            "/tmp/wiretap_state.json"
+        );
     }
 }
