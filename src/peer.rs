@@ -202,40 +202,40 @@ impl Key {
         Self(public.to_bytes())
     }
 
-    /// Parses a key from a base64 or hexadecimal string.
-    ///
-    /// Accepts both standard base64 encoding (44 characters) and hexadecimal
-    /// encoding (64 characters).
-    ///
-    /// # Arguments
-    ///
-    /// * `value` - The encoded key string
-    ///
-    /// # Returns
-    ///
-    /// The parsed key.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The encoding is invalid
-    /// - The decoded length is not 32 bytes
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use wiretap_rs::peer::Key;
-    ///
-    /// # fn example() -> anyhow::Result<()> {
-    /// // Parse from base64
-    /// let key = Key::generate_private()?;
-    /// let encoded = key.to_base64();
-    /// let parsed = Key::parse(&encoded)?;
-    /// assert_eq!(key, parsed);
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn parse(value: &str) -> Result<Self> {
+/// Parses a key from a base64 or hexadecimal string.
+///
+/// Accepts both standard base64 encoding (44 characters) and hexadecimal
+/// encoding (64 characters).
+///
+/// # Arguments
+///
+/// * `value` - The encoded key string
+///
+/// # Returns
+///
+/// The parsed key.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The encoding is invalid
+/// - The decoded length is not 32 bytes
+///
+/// # Example
+///
+/// ```rust
+/// use wiretap_rs::peer::Key;
+///
+/// # fn example() -> anyhow::Result<()> {
+/// // Parse from base64
+/// let key = Key::generate_private()?;
+/// let encoded = key.to_base64();
+/// let parsed = Key::parse(&encoded)?;
+/// assert_eq!(key, parsed);
+/// # Ok(())
+/// # }
+/// ```
+pub fn parse(value: &str) -> Result<Self> {
         if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(value) {
             if decoded.len() == 32 {
                 let mut bytes = [0u8; 32];

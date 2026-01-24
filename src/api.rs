@@ -496,7 +496,7 @@ pub fn add_peer(addr: SocketAddr, iface: InterfaceType, config: PeerConfig) -> R
 /// # Arguments
 ///
 /// * `addr` - The socket address of the wiretap API endpoint
-/// * `public_key` - The public key of the peer to update
+/// * `public_key` - The public key of the peer to update (base64-encoded)
 /// * `allowed_ips` - List of CIDR ranges to add to the peer's allowed IPs
 ///
 /// # Errors
@@ -511,7 +511,8 @@ pub fn add_peer(addr: SocketAddr, iface: InterfaceType, config: PeerConfig) -> R
 ///
 /// # fn example() -> anyhow::Result<()> {
 /// let api_addr: SocketAddr = "[::2]:80".parse()?;
-/// let peer_pubkey = "abcd1234..."; // base64-encoded public key
+/// // Use a valid base64-encoded WireGuard public key (44 characters)
+/// let peer_pubkey = "YourBase64EncodedPublicKeyGoesHere1234567=";
 /// let routes = vec!["10.0.0.0/24".to_string(), "192.168.1.0/24".to_string()];
 ///
 /// add_allowed_ips(api_addr, peer_pubkey, &routes)?;
