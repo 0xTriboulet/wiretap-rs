@@ -91,10 +91,8 @@ impl From<HashMap<String, String>> for ServerEnv {
 }
 
 pub(crate) fn resolve_allocation_state_path(
-    config_file: Option<&str>,
     env: &ServerEnv,
 ) -> Option<PathBuf> {
-    let _ = config_file;
     if let Some(value) = env.get("WIRETAP_ALLOCATION_STATE") {
         let trimmed = value.trim();
         if !trimmed.is_empty() {
@@ -1339,7 +1337,7 @@ mod tests {
     #[test]
     fn allocation_state_path_is_opt_in() {
         let env = crate::serve::ServerEnv::from(std::collections::HashMap::new());
-        let path = resolve_allocation_state_path(Some("wiretap_server.conf"), &env);
+        let path = resolve_allocation_state_path(&env);
         assert!(path.is_none());
     }
 
@@ -1351,10 +1349,8 @@ mod tests {
             "/tmp/wiretap_state.json".to_string(),
         );
         let env = crate::serve::ServerEnv::from(values);
-        let path = resolve_allocation_state_path(Some("wiretap_server.conf"), &env);
-        assert_eq!(
-            path.unwrap().to_string_lossy(),
-            "/tmp/wiretap_state.json"
-        );
+        let path = resolve_allocation_state_path(&env);
+        let expected = std::path::PathBuf::from("/tmp/wiretap_state.json");
+        assert_eq!(path.unwrap(), expected);
     }
 }

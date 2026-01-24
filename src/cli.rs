@@ -637,7 +637,7 @@ fn serve(args: ServeArgs) -> Result<()> {
     };
     let disable_ipv6 = args.disable_ipv6 || env.get_bool("WIRETAP_DISABLEIPV6").unwrap_or(false);
     let allocation_state_path =
-        crate::serve::resolve_allocation_state_path(args.config_file.as_deref(), &env);
+        crate::serve::resolve_allocation_state_path(&env);
     let options = crate::serve::ServeOptions {
         simple: args.simple,
         quiet: args.quiet,
