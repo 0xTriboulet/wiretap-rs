@@ -1,3 +1,37 @@
+//! Logging initialization and configuration for wiretap.
+//!
+//! This module provides structured logging capabilities using the `tracing` crate.
+//! It supports configurable log levels, file output, and quiet mode.
+//!
+//! # Configuration
+//!
+//! Logging behavior can be controlled via environment variables:
+//!
+//! - `WIRETAP_LOG_LEVEL` or `RUST_LOG`: Set log level (trace, debug, info, warn, error)
+//! - `WIRETAP_LOG_FILE`: Explicit path to log file
+//! - `WIRETAP_LOG_DIR`: Directory for log files (creates timestamped files)
+//! - `WIRETAP_QUIET`: Disable stdout/file logging (values: 1, true, yes, on)
+//!
+//! # Defaults
+//!
+//! - **Debug builds**: Log level `debug`, writes to `./logs/wiretap-<timestamp>.log` and stdout
+//! - **Release builds**: Log level `info`, writes to stdout only
+//! - **Quiet mode**: No logging output (via `WIRETAP_QUIET` or `--quiet` flag)
+//!
+//! # Example
+//!
+//! ```rust
+//! use wiretap_rs::logging;
+//!
+//! // Initialize logging at the start of your application
+//! logging::init_logging();
+//!
+//! // Check if quiet mode is enabled
+//! if logging::quiet_enabled() {
+//!     println!("Running in quiet mode");
+//! }
+//! ```
+
 use once_cell::sync::OnceCell;
 use std::env;
 use std::fs;
@@ -9,6 +43,41 @@ use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitEx
 static LOG_GUARD: OnceCell<WorkerGuard> = OnceCell::new();
 static QUIET: OnceCell<bool> = OnceCell::new();
 
+/// Initializes the logging system with tracing.
+///
+/// This function sets up structured logging with optional file output and stdout output.
+/// It should be called once at the start of the application.
+///
+/// # Behavior
+///
+/// - In debug builds: logs to both stdout and `./logs/wiretap-<timestamp>.log` at debug level
+/// - In release builds: logs to stdout only at info level
+/// - In quiet mode: disables all logging output
+///
+/// Log level can be controlled via `WIRETAP_LOG_LEVEL` or `RUST_LOG` environment variables.
+/// Quiet mode can be enabled via `WIRETAP_QUIET=1` or the `--quiet` command-line flag.
+///
+/// # Example
+///
+/// ```rust
+/// use wiretap_rs::logging;
+///
+/// fn main() {
+///     // Initialize logging before any other operations
+///     logging::init_logging();
+///     
+///     // Now you can use tracing macros
+///     tracing::info!("Application started");
+/// }
+/// ```
+///
+/// # Environment Variables
+///
+/// - `WIRETAP_LOG_LEVEL`: Set the log level (trace, debug, info, warn, error)
+/// - `RUST_LOG`: Alternative to WIRETAP_LOG_LEVEL
+/// - `WIRETAP_LOG_FILE`: Explicit path to write logs to
+/// - `WIRETAP_LOG_DIR`: Directory where log files should be created
+/// - `WIRETAP_QUIET`: Disable all logging (1, true, yes, or on)
 pub fn init_logging() {
     let quiet = detect_quiet();
     let _ = QUIET.set(quiet);
@@ -45,6 +114,27 @@ pub fn init_logging() {
         .init();
 }
 
+/// Returns whether quiet mode is currently enabled.
+///
+/// Quiet mode disables all logging output, including both stdout and file logging.
+///
+/// # Returns
+///
+/// `true` if quiet mode is enabled, `false` otherwise.
+///
+/// # Example
+///
+/// ```rust
+/// use wiretap_rs::logging;
+///
+/// logging::init_logging();
+///
+/// if logging::quiet_enabled() {
+///     // Don't print status messages in quiet mode
+/// } else {
+///     println!("Status: running");
+/// }
+/// ```
 pub fn quiet_enabled() -> bool {
     QUIET.get().copied().unwrap_or(false)
 }

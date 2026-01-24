@@ -1,3 +1,82 @@
+//! WireGuard peer configuration and key management.
+//!
+//! This module provides types and functions for managing WireGuard peers, keys, and
+//! configurations. It handles:
+//!
+//! - Key generation and parsing (private, public, and preshared keys)
+//! - Peer configuration (endpoints, allowed IPs, keepalive)
+//! - Interface configuration parsing and generation
+//! - WireGuard configuration file I/O
+//!
+//! # Key Types
+//!
+//! WireGuard uses Curve25519 keys:
+//! - **Private keys**: Secret keys used to decrypt incoming packets
+//! - **Public keys**: Derived from private keys, used to identify peers
+//! - **Preshared keys**: Optional symmetric keys for additional security
+//!
+//! # Examples
+//!
+//! ## Generating and Using Keys
+//!
+//! ```rust
+//! use wiretap_rs::peer::Key;
+//!
+//! # fn example() -> anyhow::Result<()> {
+//! // Generate a new private key
+//! let private_key = Key::generate_private()?;
+//!
+//! // Derive the corresponding public key
+//! let public_key = private_key.public_key();
+//!
+//! // Convert to base64 for WireGuard configuration
+//! println!("PublicKey = {}", public_key.to_base64());
+//!
+//! // Parse a key from base64 string
+//! let parsed = Key::parse("abcd1234...base64...")?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Creating a Peer Configuration
+//!
+//! ```rust,no_run
+//! use wiretap_rs::peer::PeerConfig;
+//!
+//! # fn example() -> anyhow::Result<()> {
+//! // Create a new peer with generated keys
+//! let mut peer = PeerConfig::new()?;
+//!
+//! // Configure the peer
+//! peer.set_endpoint("192.168.1.1:51820")?;
+//! peer.set_keepalive(25)?;
+//! peer.add_allowed_ip("10.0.0.0/24")?;
+//! peer.set_nickname("my-server");
+//!
+//! println!("Peer public key: {}", peer.public_key());
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Parsing Configuration Files
+//!
+//! ```rust,no_run
+//! use wiretap_rs::peer::parse_config_file;
+//!
+//! # fn example() -> anyhow::Result<()> {
+//! // Parse a WireGuard configuration file
+//! let config = parse_config_file("wiretap.conf")?;
+//!
+//! println!("Interface address: {:?}", config.addresses());
+//! println!("Number of peers: {}", config.peers().len());
+//!
+//! for peer in config.peers() {
+//!     println!("Peer: {}", peer.public_key());
+//! }
+//! # Ok(())
+//! # }
+//! ```
+
 use anyhow::{Result, anyhow};
 use base64::Engine;
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -12,29 +91,151 @@ use x25519_dalek::{PublicKey, StaticSecret};
 
 const CUSTOM_PREFIX: &str = "#@";
 
+/// A WireGuard cryptographic key (private, public, or preshared).
+///
+/// Wraps a 32-byte Curve25519 key used for WireGuard encryption. Can represent:
+/// - Private keys (secret, used to derive public keys)
+/// - Public keys (derived from private keys, identifies peers)
+/// - Preshared keys (optional symmetric key for additional security)
+///
+/// Keys are typically encoded as base64 strings in WireGuard configurations.
+///
+/// # Examples
+///
+/// ```rust
+/// use wiretap_rs::peer::Key;
+///
+/// # fn example() -> anyhow::Result<()> {
+/// // Generate a new private key
+/// let private = Key::generate_private()?;
+///
+/// // Derive the public key
+/// let public = private.public_key();
+///
+/// // Convert to base64 string
+/// let encoded = public.to_base64();
+/// println!("Public key: {}", encoded);
+///
+/// // Parse from base64
+/// let parsed = Key::parse(&encoded)?;
+/// assert_eq!(parsed, public);
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Key([u8; 32]);
 
 impl Key {
+    /// Generates a new random private key using a cryptographically secure RNG.
+    ///
+    /// # Returns
+    ///
+    /// A new randomly generated private key.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use wiretap_rs::peer::Key;
+    ///
+    /// # fn example() -> anyhow::Result<()> {
+    /// let private_key = Key::generate_private()?;
+    /// let public_key = private_key.public_key();
+    /// println!("Generated public key: {}", public_key);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn generate_private() -> Result<Self> {
         let mut bytes = [0u8; 32];
         OsRng.fill_bytes(&mut bytes);
         Ok(Self(bytes))
     }
 
+    /// Generates a new random preshared key using a cryptographically secure RNG.
+    ///
+    /// Preshared keys provide an additional layer of symmetric encryption on top of
+    /// the standard WireGuard handshake.
+    ///
+    /// # Returns
+    ///
+    /// A new randomly generated preshared key.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use wiretap_rs::peer::Key;
+    ///
+    /// # fn example() -> anyhow::Result<()> {
+    /// let preshared = Key::generate_preshared()?;
+    /// println!("Preshared key: {}", preshared.to_base64());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn generate_preshared() -> Result<Self> {
         let mut bytes = [0u8; 32];
         OsRng.fill_bytes(&mut bytes);
         Ok(Self(bytes))
     }
 
+    /// Derives the public key from this private key.
+    ///
+    /// Uses Curve25519 scalar multiplication to compute the public key.
+    ///
+    /// # Returns
+    ///
+    /// The corresponding public key.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use wiretap_rs::peer::Key;
+    ///
+    /// # fn example() -> anyhow::Result<()> {
+    /// let private = Key::generate_private()?;
+    /// let public = private.public_key();
+    /// assert_ne!(private.to_base64(), public.to_base64());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn public_key(&self) -> Self {
         let secret = StaticSecret::from(self.0);
         let public = PublicKey::from(&secret);
         Self(public.to_bytes())
     }
 
-    pub fn parse(value: &str) -> Result<Self> {
+/// Parses a key from a base64 or hexadecimal string.
+///
+/// Accepts both standard base64 encoding (44 characters) and hexadecimal
+/// encoding (64 characters).
+///
+/// # Arguments
+///
+/// * `value` - The encoded key string
+///
+/// # Returns
+///
+/// The parsed key.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The encoding is invalid
+/// - The decoded length is not 32 bytes
+///
+/// # Example
+///
+/// ```rust
+/// use wiretap_rs::peer::Key;
+///
+/// # fn example() -> anyhow::Result<()> {
+/// // Parse from base64
+/// let key = Key::generate_private()?;
+/// let encoded = key.to_base64();
+/// let parsed = Key::parse(&encoded)?;
+/// assert_eq!(key, parsed);
+/// # Ok(())
+/// # }
+/// ```
+pub fn parse(value: &str) -> Result<Self> {
         if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(value) {
             if decoded.len() == 32 {
                 let mut bytes = [0u8; 32];
@@ -53,18 +254,76 @@ impl Key {
         Ok(Self(bytes))
     }
 
+    /// Encodes this key as a base64 string.
+    ///
+    /// # Returns
+    ///
+    /// A 44-character base64 string suitable for WireGuard configuration files.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use wiretap_rs::peer::Key;
+    ///
+    /// # fn example() -> anyhow::Result<()> {
+    /// let key = Key::generate_private()?;
+    /// let encoded = key.to_base64();
+    /// assert_eq!(encoded.len(), 44);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn to_base64(self) -> String {
         base64::engine::general_purpose::STANDARD.encode(self.0)
     }
 
+    /// Creates a zero-filled key (all bytes are 0).
+    ///
+    /// Used internally for placeholder values. Not suitable for cryptographic use.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use wiretap_rs::peer::Key;
+    ///
+    /// let zero = Key::zero();
+    /// assert_eq!(zero.to_bytes(), [0u8; 32]);
+    /// ```
     pub fn zero() -> Self {
         Self([0u8; 32])
     }
 
+    /// Returns the raw 32-byte key material by value.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use wiretap_rs::peer::Key;
+    ///
+    /// # fn example() -> anyhow::Result<()> {
+    /// let key = Key::generate_private()?;
+    /// let bytes = key.to_bytes();
+    /// assert_eq!(bytes.len(), 32);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn to_bytes(self) -> [u8; 32] {
         self.0
     }
 
+    /// Returns the raw 32-byte key material by reference.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use wiretap_rs::peer::Key;
+    ///
+    /// # fn example() -> anyhow::Result<()> {
+    /// let key = Key::generate_private()?;
+    /// let bytes = key.as_bytes();
+    /// assert_eq!(bytes.len(), 32);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn as_bytes(&self) -> [u8; 32] {
         self.0
     }
@@ -101,6 +360,30 @@ impl<'de> Deserialize<'de> for Key {
     }
 }
 
+/// Configuration for a single WireGuard peer.
+///
+/// Contains all the information needed to configure a WireGuard peer connection,
+/// including keys, endpoint, allowed IPs, and keepalive settings.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use wiretap_rs::peer::PeerConfig;
+///
+/// # fn example() -> anyhow::Result<()> {
+/// // Create a new peer with generated keys
+/// let mut peer = PeerConfig::new()?;
+///
+/// // Configure endpoint and allowed IPs
+/// peer.set_endpoint("192.168.1.1:51820")?;
+/// peer.add_allowed_ip("10.0.0.0/24")?;
+/// peer.add_allowed_ip("fd00::/48")?;
+/// peer.set_keepalive(25)?;
+///
+/// println!("Public key: {}", peer.public_key());
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PeerConfig {
     public_key: Key,
@@ -113,15 +396,34 @@ pub struct PeerConfig {
     nickname: Option<String>,
 }
 
+/// Arguments for constructing a PeerConfig.
+///
+/// Used when parsing command-line arguments or other external configurations
+/// to build a PeerConfig instance.
 #[derive(Clone, Default)]
 pub struct PeerConfigArgs {
+    /// Base64-encoded public key string.
     pub public_key: Option<String>,
+    
+    /// Base64-encoded preshared key string.
     pub preshared_key: Option<String>,
+    
+    /// Endpoint in the format "host:port".
     pub endpoint: Option<String>,
+    
+    /// Persistent keepalive interval in seconds.
     pub persistent_keepalive: Option<u16>,
+    
+    /// Whether to replace existing allowed IPs.
     pub replace_allowed_ips: bool,
+    
+    /// List of CIDR-notation allowed IPs.
     pub allowed_ips: Vec<String>,
+    
+    /// Base64-encoded private key string.
     pub private_key: Option<String>,
+    
+    /// Optional nickname for the peer.
     pub nickname: Option<String>,
 }
 
