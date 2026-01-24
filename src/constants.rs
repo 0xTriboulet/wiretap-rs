@@ -32,7 +32,7 @@ use ipnet::{Ipv4Net, Ipv6Net};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 /// Version string for the wiretap-rs implementation.
-pub const VERSION: &str = "v0.0.0";
+pub const VERSION: &str = "v0.1.0";
 
 /// Default UDP port for the relay WireGuard interface.
 pub const DEFAULT_PORT: u16 = 51820;
