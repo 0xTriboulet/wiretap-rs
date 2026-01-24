@@ -690,15 +690,17 @@ impl ApiService {
 }
 
 fn write_atomic(path: &std::path::Path, payload: &[u8]) -> Result<()> {
-    let tmp = path.with_extension("tmp");
+    let mut tmp_os = std::ffi::OsString::from(path.as_os_str());
+    tmp_os.push(".tmp");
+    let tmp_path = std::path::PathBuf::from(tmp_os);
     {
-        let mut file = std::fs::File::create(&tmp)?;
+        let mut file = std::fs::File::create(&tmp_path)?;
         file.write_all(payload)?;
         file.sync_all()?;
     }
-    if std::fs::rename(&tmp, path).is_err() {
+    if std::fs::rename(&tmp_path, path).is_err() {
         let _ = std::fs::remove_file(path);
-        std::fs::rename(tmp, path)?;
+        std::fs::rename(&tmp_path, path)?;
     }
     Ok(())
 }
