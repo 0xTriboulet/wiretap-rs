@@ -997,6 +997,7 @@ fn run_expose_tcp_listener(
                             SocketAddr::new(tuple.remote_addr, port)
                         }
                         None => {
+                            let _ = socks5::send_reply(&mut stream, 0x01);
                             continue;
                         }
                     }

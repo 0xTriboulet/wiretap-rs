@@ -1,6 +1,6 @@
 [package]
 name = "wiretap-rs"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["Wiretap Contributors"]
 description = "A transparent, VPN-like proxy server that tunnels traffic via WireGuard - Rust port of the original Go implementation"

@@ -74,7 +74,7 @@ pub fn ip_header_len(packet: &[u8]) -> Result<usize> {
     let version = packet[0] >> 4;
     match version {
         4 => {
-            if packet.is_empty() {
+            if packet.len() < 20 {
                 return Err(anyhow!("ipv4 header too short"));
             }
             let ihl = (packet[0] & 0x0f) as usize * 4;
