@@ -334,10 +334,14 @@ fn unhide_command(mut cmd: clap::Command) -> clap::Command {
 
 pub fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
+    run_with_args(&args)
+}
+
+pub fn run_with_args(args: &[String]) -> Result<()> {
     let show_hidden = args.iter().any(|arg| arg == "--show-hidden" || arg == "-H");
     let cmd = build_cli_command(show_hidden);
 
-    let matches = match cmd.try_get_matches_from(&args) {
+    let matches = match cmd.try_get_matches_from(args) {
         Ok(matches) => matches,
         Err(err) => {
             use clap::error::ErrorKind;
