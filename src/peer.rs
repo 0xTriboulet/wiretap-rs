@@ -77,7 +77,7 @@
 //! # }
 //! ```
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use base64::Engine;
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use owo_colors::OwoColorize;
@@ -202,40 +202,40 @@ impl Key {
         Self(public.to_bytes())
     }
 
-/// Parses a key from a base64 or hexadecimal string.
-///
-/// Accepts both standard base64 encoding (44 characters) and hexadecimal
-/// encoding (64 characters).
-///
-/// # Arguments
-///
-/// * `value` - The encoded key string
-///
-/// # Returns
-///
-/// The parsed key.
-///
-/// # Errors
-///
-/// Returns an error if:
-/// - The encoding is invalid
-/// - The decoded length is not 32 bytes
-///
-/// # Example
-///
-/// ```rust
-/// use wiretap_rs::peer::Key;
-///
-/// # fn example() -> anyhow::Result<()> {
-/// // Parse from base64
-/// let key = Key::generate_private()?;
-/// let encoded = key.to_base64();
-/// let parsed = Key::parse(&encoded)?;
-/// assert_eq!(key, parsed);
-/// # Ok(())
-/// # }
-/// ```
-pub fn parse(value: &str) -> Result<Self> {
+    /// Parses a key from a base64 or hexadecimal string.
+    ///
+    /// Accepts both standard base64 encoding (44 characters) and hexadecimal
+    /// encoding (64 characters).
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - The encoded key string
+    ///
+    /// # Returns
+    ///
+    /// The parsed key.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The encoding is invalid
+    /// - The decoded length is not 32 bytes
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use wiretap_rs::peer::Key;
+    ///
+    /// # fn example() -> anyhow::Result<()> {
+    /// // Parse from base64
+    /// let key = Key::generate_private()?;
+    /// let encoded = key.to_base64();
+    /// let parsed = Key::parse(&encoded)?;
+    /// assert_eq!(key, parsed);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn parse(value: &str) -> Result<Self> {
         if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(value) {
             if decoded.len() == 32 {
                 let mut bytes = [0u8; 32];
@@ -404,25 +404,25 @@ pub struct PeerConfig {
 pub struct PeerConfigArgs {
     /// Base64-encoded public key string.
     pub public_key: Option<String>,
-    
+
     /// Base64-encoded preshared key string.
     pub preshared_key: Option<String>,
-    
+
     /// Endpoint in the format "host:port".
     pub endpoint: Option<String>,
-    
+
     /// Persistent keepalive interval in seconds.
     pub persistent_keepalive: Option<u16>,
-    
+
     /// Whether to replace existing allowed IPs.
     pub replace_allowed_ips: bool,
-    
+
     /// List of CIDR-notation allowed IPs.
     pub allowed_ips: Vec<String>,
-    
+
     /// Base64-encoded private key string.
     pub private_key: Option<String>,
-    
+
     /// Optional nickname for the peer.
     pub nickname: Option<String>,
 }
@@ -809,7 +809,7 @@ impl Config {
             s.push_str(&format!("LocalhostIP = {}\n", localhost));
         }
         for peer in &self.peers {
-            s.push_str("\n");
+            s.push('\n');
             s.push_str(&peer.as_file());
         }
         s
@@ -1060,7 +1060,7 @@ pub fn create_server_command(
     vals.push(
         relay
             .peers()
-            .get(0)
+            .first()
             .map(|p| p.public_key().to_string())
             .unwrap_or_default(),
     );
@@ -1070,7 +1070,7 @@ pub fn create_server_command(
         vals.push(key.to_string());
     }
 
-    if let Some(peer) = relay.peers().get(0) {
+    if let Some(peer) = relay.peers().first() {
         if !peer.allowed_ips().is_empty() {
             let allowed = peer
                 .allowed_ips()
@@ -1102,12 +1102,12 @@ pub fn create_server_command(
         keys.push("WIRETAP_E2EE_PEER_PUBLICKEY");
         vals.push(
             e2ee.peers()
-                .get(0)
+                .first()
                 .map(|p| p.public_key().to_string())
                 .unwrap_or_default(),
         );
 
-        if let Some(peer) = e2ee.peers().get(0) {
+        if let Some(peer) = e2ee.peers().first() {
             if let Some(endpoint) = peer.endpoint() {
                 keys.push("WIRETAP_E2EE_PEER_ENDPOINT");
                 vals.push(endpoint.to_string());
@@ -1170,7 +1170,7 @@ pub fn create_server_file(relay: &Config, e2ee: &Config, simple: bool) -> String
     }
 
     s.push_str("\n[Relay.Peer]\n");
-    if let Some(peer) = relay.peers().get(0) {
+    if let Some(peer) = relay.peers().first() {
         if !peer.allowed_ips().is_empty() {
             let allowed = peer
                 .allowed_ips()
@@ -1199,7 +1199,7 @@ pub fn create_server_file(relay: &Config, e2ee: &Config, simple: bool) -> String
         }
 
         s.push_str("\n[E2EE.Peer]\n");
-        if let Some(peer) = e2ee.peers().get(0) {
+        if let Some(peer) = e2ee.peers().first() {
             s.push_str(&format!("PublicKey = {}\n", peer.public_key()));
             if let Some(endpoint) = peer.endpoint() {
                 s.push_str(&format!("Endpoint = {}\n", endpoint));

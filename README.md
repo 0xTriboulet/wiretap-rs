@@ -55,10 +55,32 @@ git clone https://github.com/0xTriboulet/wiretap-rs.git
 cd wiretap-rs
 
 # Build the project
+cargo build
 cargo build --release
 
 # The binary will be at target/release/wiretap-rs
 ```
+
+### Building with CMake/cmkr (for C/C++ integration)
+
+This repository also supports a CMake wrapper around Cargo builds so C/C++ projects can consume it with FetchContent or add_subdirectory.
+
+**Prerequisites:** Rust toolchain + CMake + cmkr
+
+```bash
+# Generate CMakeLists.txt from cmake.toml (if needed)
+cmkr
+
+# Debug build
+cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
+cmake --build build-debug
+
+# Release build
+cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
+cmake --build build-release
+```
+
+The imported CMake target is `wiretap_rs::wiretap_rs` and public headers are under `include/`.
 
 ### Using as a Library
 
@@ -74,6 +96,18 @@ Or add to your `Cargo.toml`:
 [dependencies]
 wiretap-rs = "0.1"
 ```
+
+### Using from C/C++
+
+`wiretap-rs` exposes a C ABI command-dispatch entrypoint that reuses the Rust CLI parser:
+
+- `int32_t wiretap_run_argv(int argc, const char* const* argv);`
+- `char* wiretap_last_error_message(void);`
+- `void wiretap_string_free(char* ptr);`
+
+Header: `include/wiretap_rs.h`
+
+`wiretap_last_error_message()` returns owned memory; always release it with `wiretap_string_free()`.
 
 ## Getting Started
 

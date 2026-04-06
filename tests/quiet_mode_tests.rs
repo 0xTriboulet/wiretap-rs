@@ -22,7 +22,11 @@ fn resolve_binary() -> PathBuf {
         return PathBuf::from(path);
     }
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let bin_name = if cfg!(windows) { "wiretap-rs.exe" } else { "wiretap-rs" };
+    let bin_name = if cfg!(windows) {
+        "wiretap-rs.exe"
+    } else {
+        "wiretap-rs"
+    };
     manifest_dir.join("target").join("debug").join(bin_name)
 }
 
@@ -33,13 +37,20 @@ fn serve_quiet_suppresses_output() {
     fs::write(&config_path, "[Relay.Interface]\n").expect("write config");
 
     let bin = resolve_binary();
-    assert!(bin.exists(), "wiretap-rs binary not found: {}", bin.display());
+    assert!(
+        bin.exists(),
+        "wiretap-rs binary not found: {}",
+        bin.display()
+    );
     let output = Command::new(bin)
         .arg("serve")
         .arg("--quiet")
         .arg("--config-file")
         .arg(&config_path)
-        .env("WIRETAP_LOG_DIR", dir.join("logs").to_string_lossy().to_string())
+        .env(
+            "WIRETAP_LOG_DIR",
+            dir.join("logs").to_string_lossy().to_string(),
+        )
         .output()
         .expect("run wiretap-rs");
 

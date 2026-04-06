@@ -1,5 +1,5 @@
 use crate::peer::Key;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use boringtun::noise::errors::WireGuardError;
 use boringtun::noise::{Tunn, TunnResult};
 use boringtun::x25519::{PublicKey, StaticSecret};
@@ -720,15 +720,13 @@ fn is_connection_expired(err: &WireGuardError) -> bool {
 fn is_ignorable_decapsulate_error(err: &WireGuardError) -> bool {
     matches!(
         err,
-        WireGuardError::WrongIndex
-            | WireGuardError::WrongKey
-            | WireGuardError::InvalidMac
+        WireGuardError::WrongIndex | WireGuardError::WrongKey | WireGuardError::InvalidMac
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{RouteEntry, is_ignorable_decapsulate_error, select_peer_index};
+    use super::{is_ignorable_decapsulate_error, select_peer_index, RouteEntry};
     use boringtun::noise::errors::WireGuardError;
     use ipnet::IpNet;
     use std::net::IpAddr;

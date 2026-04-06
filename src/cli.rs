@@ -1,16 +1,16 @@
 use crate::clipboard;
 use crate::constants;
 use crate::peer::{
-    Config, ConfigArgs, PeerConfigArgs, Shell, create_server_command, create_server_file,
-    find_available_filename,
+    create_server_command, create_server_file, find_available_filename, Config, ConfigArgs,
+    PeerConfigArgs, Shell,
 };
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use owo_colors::OwoColorize;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::str::FromStr;
 
 #[derive(Parser)]
@@ -148,6 +148,9 @@ pub struct ServeArgs {
 
     #[arg(long = "keepalive-count", default_value_t = constants::DEFAULT_KEEPALIVE_COUNT)]
     pub keepalive_count: u32,
+
+    #[arg(long = "udp-timeout", default_value_t = constants::DEFAULT_UDP_TIMEOUT_SECS)]
+    pub udp_timeout_secs: u64,
 }
 
 #[derive(Parser, Debug, Default)]
@@ -331,12 +334,14 @@ fn unhide_command(mut cmd: clap::Command) -> clap::Command {
 
 pub fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    let show_hidden = args
-        .iter()
-        .any(|arg| arg == "--show-hidden" || arg == "-H");
+    run_with_args(&args)
+}
+
+pub fn run_with_args(args: &[String]) -> Result<()> {
+    let show_hidden = args.iter().any(|arg| arg == "--show-hidden" || arg == "-H");
     let cmd = build_cli_command(show_hidden);
 
-    let matches = match cmd.try_get_matches_from(&args) {
+    let matches = match cmd.try_get_matches_from(args) {
         Ok(matches) => matches,
         Err(err) => {
             use clap::error::ErrorKind;
@@ -431,12 +436,14 @@ fn configure(mut args: ConfigureArgs) -> Result<()> {
         server_config_e2ee.add_address(&args.api_addr)?;
     }
 
-    let mut relay_peer_args = PeerConfigArgs::default();
-    relay_peer_args.public_key = Some(server_config_relay.public_key().to_string());
-    relay_peer_args.allowed_ips = if args.simple {
-        args.routes.clone()
-    } else {
-        relay_subnets.iter().map(|net| net.to_string()).collect()
+    let mut relay_peer_args = PeerConfigArgs {
+        public_key: Some(server_config_relay.public_key().to_string()),
+        allowed_ips: if args.simple {
+            args.routes.clone()
+        } else {
+            relay_subnets.iter().map(|net| net.to_string()).collect()
+        },
+        ..Default::default()
     };
     if let Some(outbound) = &args.outbound_endpoint {
         relay_peer_args.endpoint = Some(outbound.clone());
@@ -457,14 +464,16 @@ fn configure(mut args: ConfigureArgs) -> Result<()> {
     })?;
 
     let relay_endpoint_ip = constants::increment_v4(relay_subnet4.network(), 2);
-    let mut e2ee_peer_args = PeerConfigArgs::default();
-    e2ee_peer_args.public_key = Some(server_config_e2ee.public_key().to_string());
-    e2ee_peer_args.allowed_ips = args.routes.clone();
-    e2ee_peer_args.endpoint = Some(format!(
-        "{}:{}",
-        relay_endpoint_ip,
-        constants::DEFAULT_E2EE_PORT
-    ));
+    let mut e2ee_peer_args = PeerConfigArgs {
+        public_key: Some(server_config_e2ee.public_key().to_string()),
+        allowed_ips: args.routes.clone(),
+        endpoint: Some(format!(
+            "{}:{}",
+            relay_endpoint_ip,
+            constants::DEFAULT_E2EE_PORT
+        )),
+        ..Default::default()
+    };
     if !args.nickname.is_empty() {
         e2ee_peer_args.nickname = Some(args.nickname.clone());
     }
@@ -485,7 +494,7 @@ fn configure(mut args: ConfigureArgs) -> Result<()> {
     let mut client_peer_e2ee = client_config_e2ee.as_peer()?;
     let relay_ip = client_config_relay
         .addresses()
-        .get(0)
+        .first()
         .map(|net| net.addr())
         .ok_or_else(|| anyhow!("client relay address missing"))?;
     client_peer_e2ee.set_endpoint(&format!("{}:{}", relay_ip, constants::DEFAULT_E2EE_PORT))?;
@@ -589,11 +598,7 @@ fn configure(mut args: ConfigureArgs) -> Result<()> {
     println!("{}", server_status);
     println!();
     println!("{}", "server command:".bold().green());
-    println!(
-        "{} {}",
-        "POSIX Shell:".cyan(),
-        server_command_posix.green()
-    );
+    println!("{} {}", "POSIX Shell:".cyan(), server_command_posix.green());
     println!(
         "{} {}",
         "PowerShell:".cyan(),
@@ -636,8 +641,7 @@ fn serve(args: ServeArgs) -> Result<()> {
         None => None,
     };
     let disable_ipv6 = args.disable_ipv6 || env.get_bool("WIRETAP_DISABLEIPV6").unwrap_or(false);
-    let allocation_state_path =
-        crate::serve::resolve_allocation_state_path(&env);
+    let allocation_state_path = crate::serve::resolve_allocation_state_path(&env);
     let options = crate::serve::ServeOptions {
         simple: args.simple,
         quiet: args.quiet,
@@ -651,6 +655,7 @@ fn serve(args: ServeArgs) -> Result<()> {
         keepalive_idle_secs: args.keepalive_idle_secs,
         keepalive_interval_secs: args.keepalive_interval_secs,
         keepalive_count: args.keepalive_count,
+        udp_timeout_secs: args.udp_timeout_secs,
         allocation_state_path,
     };
     let config = crate::serve::apply_serve_options(config, options.clone())?;
@@ -790,6 +795,7 @@ fn status(args: StatusArgs) -> Result<()> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn print_server(
         idx: usize,
         depth: usize,
@@ -1362,14 +1368,14 @@ fn port_from_endpoint(endpoint: &str) -> Result<u16> {
 fn subnet_from_host(host: &str, prefix: u8) -> Result<Ipv4Net> {
     let ipnet = Ipv4Net::from_str(host)?;
     let ip = ipnet.addr();
-    let masked = mask_v4(ip, prefix);
+    let masked = constants::mask_prefix_v4(ip, prefix);
     Ipv4Net::new(masked, prefix).map_err(|err| anyhow!("invalid subnet: {err}"))
 }
 
 fn subnet_v6_from_host(host: &str, prefix: u8) -> Result<Ipv6Net> {
     let ipnet = Ipv6Net::from_str(host)?;
     let ip = ipnet.addr();
-    let masked = mask_v6(ip, prefix);
+    let masked = constants::mask_prefix_v6(ip, prefix);
     Ipv6Net::new(masked, prefix).map_err(|err| anyhow!("invalid subnet: {err}"))
 }
 
@@ -1426,24 +1432,6 @@ fn default_ping_api() -> String {
 
 fn default_api_port() -> u16 {
     constants::API_PORT
-}
-
-fn mask_v4(addr: Ipv4Addr, prefix: u8) -> Ipv4Addr {
-    let mask = if prefix == 0 {
-        0
-    } else {
-        u32::MAX << (32 - prefix as u32)
-    };
-    Ipv4Addr::from(u32::from(addr) & mask)
-}
-
-fn mask_v6(addr: Ipv6Addr, prefix: u8) -> Ipv6Addr {
-    let mask = if prefix == 0 {
-        0
-    } else {
-        u128::MAX << (128 - prefix as u32)
-    };
-    Ipv6Addr::from(u128::from(addr) & mask)
 }
 
 #[cfg(test)]
@@ -1513,8 +1501,7 @@ mod tests {
         };
 
         configure(args).expect("configure");
-        let server_contents =
-            fs::read_to_string(&server_output).expect("read server config");
+        let server_contents = fs::read_to_string(&server_output).expect("read server config");
         assert!(server_contents.contains("IPv4 = 192.0.2.10"));
 
         fs::remove_dir_all(&temp_dir).ok();

@@ -259,9 +259,7 @@ fn server_info_allows_relay_only() {
 fn allocation_state_persists_across_restarts() {
     let path = temp_state_path("persist");
     let mut service = ApiService::new();
-    service
-        .set_allocation_state_path(&path)
-        .expect("set path");
+    service.set_allocation_state_path(&path).expect("set path");
 
     let first = service
         .handle_message(serialize(ApiRequest::Allocate(PeerType::Server)))
@@ -273,9 +271,7 @@ fn allocation_state_persists_across_restarts() {
     drop(service);
 
     let mut service = ApiService::new();
-    service
-        .set_allocation_state_path(&path)
-        .expect("load path");
+    service.set_allocation_state_path(&path).expect("load path");
 
     let second = service
         .handle_message(serialize(ApiRequest::Allocate(PeerType::Server)))
@@ -316,9 +312,7 @@ fn allocation_state_persists_across_restarts() {
 fn allocation_state_creates_file_on_allocate() {
     let path = temp_state_path("create");
     let mut service = ApiService::new();
-    service
-        .set_allocation_state_path(&path)
-        .expect("set path");
+    service.set_allocation_state_path(&path).expect("set path");
 
     service
         .handle_message(serialize(ApiRequest::Allocate(PeerType::Client)))

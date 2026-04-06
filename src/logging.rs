@@ -38,7 +38,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 static LOG_GUARD: OnceCell<WorkerGuard> = OnceCell::new();
 static QUIET: OnceCell<bool> = OnceCell::new();
@@ -81,7 +81,11 @@ static QUIET: OnceCell<bool> = OnceCell::new();
 pub fn init_logging() {
     let quiet = detect_quiet();
     let _ = QUIET.set(quiet);
-    let default_level = if cfg!(debug_assertions) { "debug" } else { "info" };
+    let default_level = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "info"
+    };
     let filter = env::var("WIRETAP_LOG_LEVEL")
         .or_else(|_| env::var("RUST_LOG"))
         .unwrap_or_else(|_| default_level.to_string());
@@ -100,10 +104,18 @@ pub fn init_logging() {
             if let Some(parent) = path.parent() {
                 let _ = fs::create_dir_all(parent);
             }
-            let file = fs::OpenOptions::new().create(true).append(true).open(&path).ok()?;
+            let file = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .ok()?;
             let (writer, guard) = tracing_appender::non_blocking(file);
             let _ = LOG_GUARD.set(guard);
-            Some(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(writer))
+            Some(
+                tracing_subscriber::fmt::layer()
+                    .with_ansi(false)
+                    .with_writer(writer),
+            )
         })
     };
 
@@ -149,20 +161,6 @@ fn detect_quiet() -> bool {
     env::args().any(|arg| arg == "-q" || arg == "--quiet")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{init_logging, quiet_enabled};
-
-    #[test]
-    fn quiet_env_enables_quiet_mode() {
-        unsafe {
-            std::env::set_var("WIRETAP_QUIET", "1");
-        }
-        init_logging();
-        assert!(quiet_enabled());
-    }
-}
-
 fn resolve_log_file_path() -> Option<PathBuf> {
     if let Ok(path) = env::var("WIRETAP_LOG_FILE") {
         let trimmed = path.trim();
@@ -193,4 +191,18 @@ fn default_log_filename() -> String {
         .unwrap_or_default()
         .as_secs();
     format!("wiretap-{stamp}.log")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{init_logging, quiet_enabled};
+
+    #[test]
+    fn quiet_env_enables_quiet_mode() {
+        unsafe {
+            std::env::set_var("WIRETAP_QUIET", "1");
+        }
+        init_logging();
+        assert!(quiet_enabled());
+    }
 }

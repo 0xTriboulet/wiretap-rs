@@ -1,4 +1,4 @@
-use wiretap_rs::add::{AddServerArgs, build_add_server_plan};
+use wiretap_rs::add::{build_add_server_plan, AddServerArgs};
 
 #[test]
 fn add_server_plan_allocates_new_server_addresses() {
@@ -116,20 +116,16 @@ AllowedIPs = 10.0.0.0/24,::2/128\n";
     };
 
     let plan = build_add_server_plan(relay, e2ee, &args).expect("plan");
-    assert!(
-        !plan
-            .server_command_posix
-            .contains("WIRETAP_RELAY_PEER_ENDPOINT=10.0.0.9:60000")
-    );
+    assert!(!plan
+        .server_command_posix
+        .contains("WIRETAP_RELAY_PEER_ENDPOINT=10.0.0.9:60000"));
     assert!(plan.server_relay_config.contains("Port = 60000"));
-    assert!(
-        plan.client_relay_update
-            .contains("Endpoint = 10.0.0.9:60000")
-    );
-    assert!(
-        plan.client_relay_update
-            .contains("PersistentKeepalive = 25")
-    );
+    assert!(plan
+        .client_relay_update
+        .contains("Endpoint = 10.0.0.9:60000"));
+    assert!(plan
+        .client_relay_update
+        .contains("PersistentKeepalive = 25"));
 }
 
 #[test]
@@ -167,10 +163,9 @@ AllowedIPs = 10.0.0.0/24,::2/128\n";
     };
 
     let plan = build_add_server_plan(relay, e2ee, &args).expect("plan");
-    assert!(
-        plan.server_relay_config
-            .contains("LocalhostIP = 192.168.137.137")
-    );
+    assert!(plan
+        .server_relay_config
+        .contains("LocalhostIP = 192.168.137.137"));
 }
 
 #[test]

@@ -1,4 +1,4 @@
-use wiretap_rs::add::{AddClientApiArgs, build_add_client_plan_with_api};
+use wiretap_rs::add::{build_add_client_plan_with_api, AddClientApiArgs};
 use wiretap_rs::peer::parse_config;
 use wiretap_rs::transport::api::NetworkState;
 

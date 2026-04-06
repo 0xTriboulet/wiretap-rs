@@ -1,12 +1,12 @@
 use std::net::{IpAddr, SocketAddr};
 use wiretap_rs::peer::Key;
-use wiretap_rs::transport::TransportProtocol;
 use wiretap_rs::transport::packet::{
     build_ipv4_header, build_tcp_header, build_udp_packet, parse_ip_packet, parse_tcp_header,
     parse_udp_packet, tcp_checksum_ipv4,
 };
 use wiretap_rs::transport::smoltcp::SmoltcpTcpProxy;
 use wiretap_rs::transport::wireguard::{MultiPeerSession, OutboundDatagram, PeerConfig};
+use wiretap_rs::transport::TransportProtocol;
 
 fn wrap_datagrams(
     datagrams: &[OutboundDatagram],

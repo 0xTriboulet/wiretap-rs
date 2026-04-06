@@ -1,5 +1,5 @@
 use crate::transport::TransportProtocol;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

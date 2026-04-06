@@ -1,18 +1,19 @@
 use crate::constants::{
-    SUBNET_V4_BITS, SUBNET_V6_BITS, default_api_v6, default_client_e2ee_v4, default_client_e2ee_v6,
-    default_client_relay_v4, default_client_relay_v6, default_server_e2ee_v4,
-    default_server_e2ee_v6, default_server_relay_v4, default_server_relay_v6, increment_v4,
-    increment_v6, relay_subnet_v4, relay_subnet_v6,
+    default_api_v6, default_client_e2ee_v4, default_client_e2ee_v6, default_client_relay_v4,
+    default_client_relay_v6, default_server_e2ee_v4, default_server_e2ee_v6,
+    default_server_relay_v4, default_server_relay_v6, increment_v4, increment_v6, mask_prefix_v4,
+    mask_prefix_v6, relay_subnet_v4, relay_subnet_v6, SUBNET_V4_BITS, SUBNET_V6_BITS,
 };
+use crate::transport::socks5;
 use crate::transport::userspace::resolve_peer_endpoint;
 use crate::transport::wireguard::{MultiPeerSession, MultiPeerTunnel, PeerConfig as WgPeerConfig};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use get_if_addrs::IfAddr;
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::{HashMap, HashSet};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -182,6 +183,140 @@ pub enum ApiResponse {
     Ack,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HttpStatusError {
+    pub(crate) status: u16,
+    message: String,
+}
+
+impl HttpStatusError {
+    fn new(status: u16, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            message: message.into(),
+        }
+    }
+
+    fn bad_request(message: impl Into<String>) -> Self {
+        Self::new(400, message)
+    }
+
+    fn method_not_allowed(message: impl Into<String>) -> Self {
+        Self::new(405, message)
+    }
+
+    fn not_found(message: impl Into<String>) -> Self {
+        Self::new(404, message)
+    }
+
+    fn internal(message: impl Into<String>) -> Self {
+        Self::new(500, message)
+    }
+}
+
+impl std::fmt::Display for HttpStatusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for HttpStatusError {}
+
+fn require_method(method: &str, expected: &str) -> std::result::Result<(), HttpStatusError> {
+    if method == expected {
+        Ok(())
+    } else {
+        Err(HttpStatusError::method_not_allowed("method not allowed"))
+    }
+}
+
+fn map_allocate_error(err: anyhow::Error) -> HttpStatusError {
+    let message = err.to_string();
+    if message.contains("missing type") || message.contains("invalid type") {
+        HttpStatusError::bad_request(message)
+    } else {
+        HttpStatusError::internal(message)
+    }
+}
+
+pub(crate) fn handle_http_request_with_status(
+    method: &str,
+    url: &str,
+    body: &[u8],
+    remote_addr: Option<IpAddr>,
+    service: &Arc<Mutex<ApiService>>,
+) -> std::result::Result<ApiResponse, HttpStatusError> {
+    let method = method.to_ascii_uppercase();
+    let (path, query) = split_url(url);
+
+    match path {
+        "/ping" => Ok(ApiResponse::Pong("pong".into())),
+        "/expose" => {
+            require_method(method.as_str(), "POST")?;
+            let mut expose_req: ExposeRequest = read_json_bytes(body).map_err(|err| {
+                HttpStatusError::internal(format!("invalid expose request: {err}"))
+            })?;
+            if expose_req.remote_addr.is_none() {
+                expose_req.remote_addr = remote_addr;
+            }
+            let mut svc = service
+                .lock()
+                .map_err(|_| HttpStatusError::internal("api service poisoned"))?;
+            svc.handle_expose(expose_req)
+                .map_err(|err| HttpStatusError::internal(err.to_string()))
+        }
+        "/serverinfo" => {
+            require_method(method.as_str(), "GET")?;
+            let svc = service
+                .lock()
+                .map_err(|_| HttpStatusError::internal("api service poisoned"))?;
+            svc.handle_server_info()
+                .map_err(|err| HttpStatusError::internal(err.to_string()))
+        }
+        "/serverinterfaces" => {
+            require_method(method.as_str(), "GET")?;
+            let svc = service
+                .lock()
+                .map_err(|_| HttpStatusError::internal("api service poisoned"))?;
+            svc.handle_server_interfaces()
+                .map_err(|err| HttpStatusError::internal(err.to_string()))
+        }
+        "/allocate" => {
+            require_method(method.as_str(), "GET")?;
+            handle_http_allocate_query(query, service).map_err(map_allocate_error)
+        }
+        "/addpeer" => {
+            require_method(method.as_str(), "POST")?;
+            let add = match parse_interface_query(query) {
+                Ok(Some(interface)) => {
+                    let config: crate::peer::PeerConfig = read_json_bytes(body)
+                        .map_err(|err| HttpStatusError::internal(format!("invalid json: {err}")))?;
+                    AddPeerRequest { interface, config }
+                }
+                Ok(None) => read_json_bytes(body)
+                    .map_err(|err| HttpStatusError::internal(format!("invalid json: {err}")))?,
+                Err(err) => return Err(HttpStatusError::bad_request(err.to_string())),
+            };
+            let mut svc = service
+                .lock()
+                .map_err(|_| HttpStatusError::internal("api service poisoned"))?;
+            svc.handle_add_peer(add)
+                .map_err(|err| HttpStatusError::internal(err.to_string()))
+        }
+        "/addallowedips" => {
+            require_method(method.as_str(), "POST")?;
+            let add: AddAllowedIpsRequest = read_json_bytes(body)
+                .map_err(|err| HttpStatusError::internal(format!("invalid json: {err}")))?;
+            let mut svc = service
+                .lock()
+                .map_err(|_| HttpStatusError::internal("api service poisoned"))?;
+            svc.handle_add_allowed_ips(add)
+                .map_err(|err| HttpStatusError::internal(err.to_string()))
+        }
+        _ => Err(HttpStatusError::not_found("not found")),
+    }
+}
+
 pub fn handle_http_request(
     method: &str,
     url: &str,
@@ -189,63 +324,8 @@ pub fn handle_http_request(
     remote_addr: Option<IpAddr>,
     service: &Arc<Mutex<ApiService>>,
 ) -> Result<ApiResponse> {
-    let method = method.to_ascii_uppercase();
-    let (path, query) = split_url(url);
-
-    match (method.as_str(), path) {
-        ("GET", "/ping") => Ok(ApiResponse::Pong("pong".into())),
-        ("POST", "/expose") => {
-            let mut expose_req: ExposeRequest =
-                read_json_bytes(body).map_err(|err| anyhow!("invalid expose request: {err}"))?;
-            if expose_req.remote_addr.is_none() {
-                expose_req.remote_addr = remote_addr;
-            }
-            let mut svc = service
-                .lock()
-                .map_err(|_| anyhow!("api service poisoned"))?;
-            svc.handle_expose(expose_req)
-        }
-        ("GET", "/serverinfo") => match service.lock() {
-            Ok(svc) => svc.handle_server_info(),
-            Err(_) => Err(anyhow!("api service poisoned")),
-        },
-        ("GET", "/serverinterfaces") => match service.lock() {
-            Ok(svc) => svc.handle_server_interfaces(),
-            Err(_) => Err(anyhow!("api service poisoned")),
-        },
-        ("GET", "/allocate") => handle_http_allocate_query(query, service),
-        ("POST", "/allocate") => {
-            let peer_type: PeerType =
-                read_json_bytes(body).map_err(|err| anyhow!("invalid json: {err}"))?;
-            let mut svc = service
-                .lock()
-                .map_err(|_| anyhow!("api service poisoned"))?;
-            svc.handle_allocate(peer_type)
-        }
-        ("POST", "/addpeer") => {
-            let add = match parse_interface_query(query)? {
-                Some(interface) => {
-                    let config: crate::peer::PeerConfig =
-                        read_json_bytes(body).map_err(|err| anyhow!("invalid json: {err}"))?;
-                    AddPeerRequest { interface, config }
-                }
-                None => read_json_bytes(body).map_err(|err| anyhow!("invalid json: {err}"))?,
-            };
-            let mut svc = service
-                .lock()
-                .map_err(|_| anyhow!("api service poisoned"))?;
-            svc.handle_add_peer(add)
-        }
-        ("POST", "/addallowedips") => {
-            let add: AddAllowedIpsRequest =
-                read_json_bytes(body).map_err(|err| anyhow!("invalid json: {err}"))?;
-            let mut svc = service
-                .lock()
-                .map_err(|_| anyhow!("api service poisoned"))?;
-            svc.handle_add_allowed_ips(add)
-        }
-        _ => Err(anyhow!("not found")),
-    }
+    handle_http_request_with_status(method, url, body, remote_addr, service)
+        .map_err(|err| anyhow!(err.to_string()))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -324,10 +404,7 @@ impl ApiService {
         self
     }
 
-    pub fn set_allocation_state_path<P: AsRef<std::path::Path>>(
-        &mut self,
-        path: P,
-    ) -> Result<()> {
+    pub fn set_allocation_state_path<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<()> {
         self.allocation_state_path = Some(path.as_ref().to_path_buf());
         self.load_allocation_state()
     }
@@ -393,9 +470,7 @@ impl ApiService {
                         respond: resp_tx,
                     })
                     .map_err(|_| anyhow!("expose handler unavailable"))?;
-                    match resp_rx.recv().map_err(|_| anyhow!("expose failed"))?? {
-                        () => {}
-                    }
+                    let () = resp_rx.recv().map_err(|_| anyhow!("expose failed"))??;
                 } else {
                     let handle = if request.dynamic {
                         start_dynamic_listener(&tuple)?
@@ -462,10 +537,7 @@ impl ApiService {
 
     fn handle_allocate(&mut self, peer_type: PeerType) -> Result<ApiResponse> {
         // Return current state and advance counters by one
-        let previous = self
-            .allocation_state_path
-            .as_ref()
-            .map(|_| self.snapshot());
+        let previous = self.allocation_state_path.as_ref().map(|_| self.snapshot());
         let state = self.next_state.clone();
         match peer_type {
             PeerType::Server => {
@@ -593,11 +665,11 @@ impl ApiService {
     fn apply_relay_defaults(&mut self, relay: &crate::peer::Config) {
         if let Some(addr) = first_ipv4_addr(relay) {
             self.next_state.next_server_relay_addr4 = addr;
-            self.next_state.server_relay_subnet4 = mask_v4(addr, SUBNET_V4_BITS);
+            self.next_state.server_relay_subnet4 = mask_prefix_v4(addr, SUBNET_V4_BITS);
         }
         if let Some(addr) = first_ipv6_addr(relay) {
             self.next_state.next_server_relay_addr6 = addr;
-            self.next_state.server_relay_subnet6 = mask_v6(addr, SUBNET_V6_BITS);
+            self.next_state.server_relay_subnet6 = mask_prefix_v6(addr, SUBNET_V6_BITS);
         }
     }
 
@@ -872,61 +944,8 @@ fn handle_socks5_connection(mut client: TcpStream, remote_ip: IpAddr) {
     let _ = client.set_read_timeout(Some(Duration::from_secs(30)));
     let _ = client.set_write_timeout(Some(Duration::from_secs(30)));
 
-    let ver = match read_u8(&mut client) {
-        Some(v) => v,
-        None => return,
-    };
-    if ver != 0x05 {
-        return;
-    }
-    let nmethods = match read_u8(&mut client) {
-        Some(v) => v,
-        None => return,
-    };
-    let methods = match read_exact(&mut client, nmethods as usize) {
-        Some(v) => v,
-        None => return,
-    };
-
-    if !methods.iter().any(|m| *m == 0x00) {
-        let _ = client.write_all(&[0x05, 0xFF]);
-        return;
-    }
-    if client.write_all(&[0x05, 0x00]).is_err() {
-        return;
-    }
-
-    let ver = match read_u8(&mut client) {
-        Some(v) => v,
-        None => return,
-    };
-    if ver != 0x05 {
-        return;
-    }
-    let cmd = match read_u8(&mut client) {
-        Some(v) => v,
-        None => return,
-    };
-    let _rsv = match read_u8(&mut client) {
-        Some(v) => v,
-        None => return,
-    };
-    let atyp = match read_u8(&mut client) {
-        Some(v) => v,
-        None => return,
-    };
-
-    if cmd != 0x01 {
-        let _ = send_socks_reply(&mut client, 0x07);
-        return;
-    }
-
-    if !discard_socks_addr(&mut client, atyp) {
-        let _ = send_socks_reply(&mut client, 0x08);
-        return;
-    }
-    let port = match read_u16(&mut client) {
-        Some(p) => p,
+    let port = match socks5::parse_connect_port(&mut client) {
+        Some(port) => port,
         None => return,
     };
 
@@ -934,50 +953,15 @@ fn handle_socks5_connection(mut client: TcpStream, remote_ip: IpAddr) {
     let outbound = match TcpStream::connect_timeout(&remote, Duration::from_secs(5)) {
         Ok(stream) => stream,
         Err(_) => {
-            let _ = send_socks_reply(&mut client, 0x05);
+            let _ = socks5::send_reply(&mut client, 0x05);
             return;
         }
     };
 
-    if send_socks_reply(&mut client, 0x00).is_err() {
+    if socks5::send_reply(&mut client, 0x00).is_err() {
         return;
     }
     proxy_tcp(client, outbound);
-}
-
-fn discard_socks_addr(stream: &mut TcpStream, atyp: u8) -> bool {
-    match atyp {
-        0x01 => read_exact(stream, 4).is_some(),
-        0x03 => match read_u8(stream) {
-            Some(len) => read_exact(stream, len as usize).is_some(),
-            None => false,
-        },
-        0x04 => read_exact(stream, 16).is_some(),
-        _ => false,
-    }
-}
-
-fn send_socks_reply(stream: &mut TcpStream, code: u8) -> std::io::Result<()> {
-    let reply = [0x05, code, 0x00, 0x01, 0, 0, 0, 0, 0, 0];
-    stream.write_all(&reply)
-}
-
-fn read_u8(stream: &mut TcpStream) -> Option<u8> {
-    let mut buf = [0u8; 1];
-    stream.read_exact(&mut buf).ok()?;
-    Some(buf[0])
-}
-
-fn read_u16(stream: &mut TcpStream) -> Option<u16> {
-    let mut buf = [0u8; 2];
-    stream.read_exact(&mut buf).ok()?;
-    Some(u16::from_be_bytes(buf))
-}
-
-fn read_exact(stream: &mut TcpStream, len: usize) -> Option<Vec<u8>> {
-    let mut buf = vec![0u8; len];
-    stream.read_exact(&mut buf).ok()?;
-    Some(buf)
 }
 
 fn run_udp_forwarder(listen: SocketAddr, remote: SocketAddr, shutdown: Arc<AtomicBool>) {
@@ -1051,26 +1035,6 @@ fn first_ip_addr(config: &crate::peer::Config) -> Option<IpAddr> {
     })
 }
 
-fn mask_v4(addr: Ipv4Addr, prefix: u8) -> Ipv4Addr {
-    if prefix == 0 {
-        return Ipv4Addr::UNSPECIFIED;
-    }
-    let mask = (!0u32)
-        .checked_shl(32u32.saturating_sub(prefix as u32))
-        .unwrap_or(0);
-    Ipv4Addr::from(u32::from(addr) & mask)
-}
-
-fn mask_v6(addr: Ipv6Addr, prefix: u8) -> Ipv6Addr {
-    if prefix == 0 {
-        return Ipv6Addr::UNSPECIFIED;
-    }
-    let mask = (!0u128)
-        .checked_shl(128u32.saturating_sub(prefix as u32))
-        .unwrap_or(0);
-    Ipv6Addr::from(u128::from(addr) & mask)
-}
-
 /// Starts a lightweight HTTP API server backed by `ApiService`.
 /// This is a placeholder until userspace netstack wiring exists.
 pub fn run_http_api(
@@ -1089,24 +1053,18 @@ pub fn run_http_api(
             println!("(client {remote}) - API: {}", req.url());
             let method = req.method().as_str().to_uppercase();
             let url = req.url().to_string();
-            let (path, query) = split_url(&url);
-
-            let result = match (method.as_str(), path) {
-                ("GET", "/ping") => Ok(ApiResponse::Pong("pong".into())),
-                ("POST", "/expose") => handle_http_expose(&mut req, &service),
-                ("GET", "/serverinfo") => match service.lock() {
-                    Ok(svc) => svc.handle_server_info(),
-                    Err(_) => Err(anyhow!("api service poisoned")),
-                },
-                ("GET", "/serverinterfaces") => match service.lock() {
-                    Ok(svc) => svc.handle_server_interfaces(),
-                    Err(_) => Err(anyhow!("api service poisoned")),
-                },
-                ("GET", "/allocate") => handle_http_allocate_query(query, &service),
-                ("POST", "/allocate") => handle_http_allocate(&mut req, &service),
-                ("POST", "/addpeer") => handle_http_add_peer(&mut req, &service, query),
-                ("POST", "/addallowedips") => handle_http_add_allowed_ips(&mut req, &service),
-                _ => Err(anyhow!("not found")),
+            let mut body = Vec::new();
+            let result = match req.as_reader().read_to_end(&mut body) {
+                Ok(_) => handle_http_request_with_status(
+                    method.as_str(),
+                    url.as_str(),
+                    &body,
+                    req.remote_addr().map(|addr| addr.ip()),
+                    &service,
+                ),
+                Err(err) => Err(HttpStatusError::internal(format!(
+                    "failed to read body: {err}"
+                ))),
             };
 
             let response = match result {
@@ -1136,7 +1094,9 @@ pub fn run_http_api(
                     }
                 },
                 Ok(ApiResponse::Ack) => tiny_http::Response::from_string("ok"),
-                Err(err) => tiny_http::Response::from_string(err.to_string()).with_status_code(500),
+                Err(err) => {
+                    tiny_http::Response::from_string(err.to_string()).with_status_code(err.status)
+                }
             };
 
             let _ = req.respond(response);
@@ -1187,41 +1147,6 @@ fn parse_interface_query(query: Option<&str>) -> Result<Option<InterfaceType>> {
     }
 }
 
-fn handle_http_expose(
-    req: &mut tiny_http::Request,
-    service: &Arc<Mutex<ApiService>>,
-) -> Result<ApiResponse> {
-    let mut body = String::new();
-    req.as_reader()
-        .read_to_string(&mut body)
-        .map_err(|err| anyhow!("failed to read body: {err}"))?;
-
-    let mut expose_req: ExposeRequest =
-        serde_json::from_str(&body).map_err(|err| anyhow!("invalid expose request: {err}"))?;
-
-    if expose_req.remote_addr.is_none() {
-        if let Some(addr) = req.remote_addr() {
-            expose_req.remote_addr = Some(addr.ip());
-        }
-    }
-
-    let mut svc = service
-        .lock()
-        .map_err(|_| anyhow!("api service poisoned"))?;
-    svc.handle_expose(expose_req)
-}
-
-fn handle_http_allocate(
-    req: &mut tiny_http::Request,
-    service: &Arc<Mutex<ApiService>>,
-) -> Result<ApiResponse> {
-    let peer_type: PeerType = read_json(req)?;
-    let mut svc = service
-        .lock()
-        .map_err(|_| anyhow!("api service poisoned"))?;
-    svc.handle_allocate(peer_type)
-}
-
 fn handle_http_allocate_query(
     query: Option<&str>,
     service: &Arc<Mutex<ApiService>>,
@@ -1231,43 +1156,6 @@ fn handle_http_allocate_query(
         .lock()
         .map_err(|_| anyhow!("api service poisoned"))?;
     svc.handle_allocate(peer_type)
-}
-
-fn handle_http_add_peer(
-    req: &mut tiny_http::Request,
-    service: &Arc<Mutex<ApiService>>,
-    query: Option<&str>,
-) -> Result<ApiResponse> {
-    let add = match parse_interface_query(query)? {
-        Some(interface) => {
-            let config: crate::peer::PeerConfig = read_json(req)?;
-            AddPeerRequest { interface, config }
-        }
-        None => read_json(req)?,
-    };
-    let mut svc = service
-        .lock()
-        .map_err(|_| anyhow!("api service poisoned"))?;
-    svc.handle_add_peer(add)
-}
-
-fn handle_http_add_allowed_ips(
-    req: &mut tiny_http::Request,
-    service: &Arc<Mutex<ApiService>>,
-) -> Result<ApiResponse> {
-    let add: AddAllowedIpsRequest = read_json(req)?;
-    let mut svc = service
-        .lock()
-        .map_err(|_| anyhow!("api service poisoned"))?;
-    svc.handle_add_allowed_ips(add)
-}
-
-fn read_json<T: for<'a> Deserialize<'a>>(req: &mut tiny_http::Request) -> Result<T> {
-    let mut body = String::new();
-    req.as_reader()
-        .read_to_string(&mut body)
-        .map_err(|err| anyhow!("failed to read body: {err}"))?;
-    serde_json::from_str(&body).map_err(|err| anyhow!("invalid json: {err}"))
 }
 
 fn read_json_bytes<T: for<'a> Deserialize<'a>>(body: &[u8]) -> Result<T> {

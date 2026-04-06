@@ -12,7 +12,7 @@
 //! # fn example() -> anyhow::Result<()> {
 //! let api_addr: SocketAddr = "[::2]:80".parse()?;
 //! let response = ping::run_ping(api_addr)?;
-//! 
+//!
 //! println!("Ping successful: {}", response.message);
 //! println!("Round-trip time: {:?}", response.duration);
 //! # Ok(())
@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 pub struct PingResponse {
     /// The message returned by the server (typically "pong").
     pub message: String,
-    
+
     /// The round-trip time for the ping request.
     pub duration: Duration,
 }
@@ -62,7 +62,7 @@ pub struct PingResponse {
 /// // Ping the default IPv6 API address
 /// let api_addr: SocketAddr = "[::2]:80".parse()?;
 /// let response = run_ping(api_addr)?;
-/// 
+///
 /// println!("Server responded: {}", response.message);
 /// println!("Latency: {} ms", response.duration.as_millis());
 /// # Ok(())

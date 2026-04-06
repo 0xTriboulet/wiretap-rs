@@ -32,7 +32,7 @@
 //! ```
 
 use crate::peer::parse_config;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use ipnet::IpNet;
 use std::net::IpAddr;
 
@@ -44,10 +44,10 @@ use std::net::IpAddr;
 pub struct StatusSummary {
     /// Public key of the client's relay interface.
     pub client_relay_public: String,
-    
+
     /// Public key of the client's E2EE interface.
     pub client_e2ee_public: String,
-    
+
     /// List of servers configured in the E2EE interface.
     pub servers: Vec<ServerSummary>,
 }
@@ -57,13 +57,13 @@ pub struct StatusSummary {
 pub struct ServerSummary {
     /// WireGuard public key of the server.
     pub public_key: String,
-    
+
     /// API address of the server, if available.
     pub api: Option<IpAddr>,
-    
+
     /// Network routes accessible through this server.
     pub routes: Vec<IpNet>,
-    
+
     /// Optional nickname for the server.
     pub nickname: Option<String>,
 }

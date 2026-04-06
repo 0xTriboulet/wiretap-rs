@@ -1,4 +1,4 @@
-use wiretap_rs::add::{AddClientArgs, build_add_client_plan};
+use wiretap_rs::add::{build_add_client_plan, AddClientArgs};
 
 #[test]
 fn add_client_plan_generates_new_configs() {
