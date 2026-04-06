@@ -3,7 +3,7 @@ use crate::transport::packet::{
     build_ipv4_header, build_ipv6_header, build_udp_header, parse_ip_packet, udp_checksum_ipv4,
     udp_checksum_ipv6,
 };
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
@@ -79,9 +79,9 @@ impl UdpProxy {
             dst: SocketAddr::new(parsed.dst, dst_port),
         };
 
-        if !self.conns.contains_key(&flow) {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.conns.entry(flow) {
             let conn = UdpConn::new(flow)?;
-            self.conns.insert(flow, conn);
+            e.insert(conn);
         }
 
         if let Some(conn) = self.conns.get_mut(&flow) {

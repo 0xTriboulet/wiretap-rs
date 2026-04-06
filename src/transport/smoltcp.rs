@@ -1,12 +1,17 @@
-use crate::transport::api::{ApiResponse, ApiService, handle_http_request};
+use crate::constants;
+use crate::transport::api::{
+    handle_http_request_with_status, ApiResponse, ApiService, HttpStatusError,
+};
 use crate::transport::icmp::{build_icmpv4_port_unreachable, build_icmpv6_port_unreachable};
 use crate::transport::packet::{
     build_ipv4_header, build_ipv6_header, build_udp_header, parse_ip_packet, parse_tcp_header,
     udp_checksum_ipv4, udp_checksum_ipv6,
 };
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use smoltcp::iface::{Config as IfaceConfig, Interface, SocketHandle, SocketSet};
-use smoltcp::phy::{Checksum, ChecksumCapabilities, Device, DeviceCapabilities, Medium, RxToken, TxToken};
+use smoltcp::phy::{
+    Checksum, ChecksumCapabilities, Device, DeviceCapabilities, Medium, RxToken, TxToken,
+};
 use smoltcp::socket::tcp;
 use smoltcp::socket::tcp::State;
 use smoltcp::socket::udp;
@@ -90,10 +95,7 @@ impl Default for TcpProxyConfig {
 
 impl TcpProxyConfig {
     fn idle_timeout(&self) -> Duration {
-        self.keepalive_idle
-            + self
-                .keepalive_interval
-                .saturating_mul(self.keepalive_count)
+        self.keepalive_idle + self.keepalive_interval.saturating_mul(self.keepalive_count)
     }
 }
 
@@ -276,7 +278,7 @@ impl SmoltcpTcpProxy {
             host_udp_exposes: HashMap::new(),
             rx_buffer: vec![0u8; 4096],
             udp_buffer: vec![0u8; 4096],
-            udp_idle_timeout: Duration::from_secs(60),
+            udp_idle_timeout: Duration::from_secs(constants::DEFAULT_UDP_TIMEOUT_SECS),
             udp_last_cleanup: StdInstant::now(),
             localhost_ip,
             api_service: None,
@@ -300,6 +302,14 @@ impl SmoltcpTcpProxy {
         self.api_service = Some(service);
         self.api_bind = Some(bind);
         self
+    }
+
+    pub fn set_udp_idle_timeout(&mut self, timeout: Duration) {
+        self.udp_idle_timeout = timeout;
+    }
+
+    pub fn udp_idle_timeout(&self) -> Duration {
+        self.udp_idle_timeout
     }
 
     pub fn register_host_tcp_bridge(
@@ -354,8 +364,8 @@ impl SmoltcpTcpProxy {
             IpAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), tuple.remote_port),
             IpAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), tuple.remote_port),
         };
-        let socket = UdpSocket::bind(listen_addr)
-            .map_err(|err| anyhow!("udp bind failed: {err}"))?;
+        let socket =
+            UdpSocket::bind(listen_addr).map_err(|err| anyhow!("udp bind failed: {err}"))?;
         socket.set_nonblocking(true)?;
 
         let local_ip = self
@@ -370,7 +380,9 @@ impl SmoltcpTcpProxy {
         let tx = udp::PacketBuffer::new(vec![udp::PacketMetadata::EMPTY; 64], vec![0u8; 65535]);
         let mut udp_socket = udp::Socket::new(rx, tx);
         udp_socket
-            .bind(IpListenEndpoint::from(SocketAddr::new(local_ip, local_port)))
+            .bind(IpListenEndpoint::from(SocketAddr::new(
+                local_ip, local_port,
+            )))
             .map_err(|err| anyhow!("udp bind failed: {err:?}"))?;
         let handle = self.sockets.add(udp_socket);
 
@@ -407,15 +419,16 @@ impl SmoltcpTcpProxy {
                     dst: SocketAddr::new(parsed.dst, tcp.dst_port),
                 };
 
-                if (tcp.flags & 0x02) != 0 && (tcp.flags & 0x10) == 0 {
-                    if !self.conns.contains_key(&key) {
-                        debug!(
-                            src = %key.src,
-                            dst = %key.dst,
-                            "smoltcp tcp syn received"
-                        );
-                        self.listen_for_flow(key, parsed.dst, tcp.dst_port)?;
-                    }
+                if (tcp.flags & 0x02) != 0
+                    && (tcp.flags & 0x10) == 0
+                    && !self.conns.contains_key(&key)
+                {
+                    debug!(
+                        src = %key.src,
+                        dst = %key.dst,
+                        "smoltcp tcp syn received"
+                    );
+                    self.listen_for_flow(key, parsed.dst, tcp.dst_port)?;
                 }
             }
             crate::transport::TransportProtocol::Udp => {
@@ -498,12 +511,12 @@ impl SmoltcpTcpProxy {
                 }
                 continue;
             }
-            if socket.state() != State::Established {
-                if std_now.duration_since(conn.created_at) > tcp_config.completion_timeout {
-                    socket.abort();
-                    cleanup.push(*key);
-                    continue;
-                }
+            if socket.state() != State::Established
+                && std_now.duration_since(conn.created_at) > tcp_config.completion_timeout
+            {
+                socket.abort();
+                cleanup.push(*key);
+                continue;
             }
 
             if socket.state() == State::Established && conn.stream.is_none() {
@@ -671,17 +684,14 @@ impl SmoltcpTcpProxy {
             for (payload, endpoint) in recv_items {
                 let src = ip_endpoint_to_socketaddr(endpoint)?;
                 let key = UdpFlowKey { src, dst: local };
-                if !self.udp_conns.contains_key(&key) {
+                if let std::collections::hash_map::Entry::Vacant(e) = self.udp_conns.entry(key) {
                     let os_socket = make_os_udp_socket(map_localhost_addr(local, localhost_ip))?;
-                    self.udp_conns.insert(
-                        key,
-                        UdpConnection {
-                            peer: endpoint,
-                            socket: os_socket,
-                            last_used: std_now,
-                            last_packet: Vec::new(),
-                        },
-                    );
+                    e.insert(UdpConnection {
+                        peer: endpoint,
+                        socket: os_socket,
+                        last_used: std_now,
+                        last_packet: Vec::new(),
+                    });
                 }
                 if let Some(conn) = self.udp_conns.get_mut(&key) {
                     conn.peer = endpoint;
@@ -736,7 +746,11 @@ impl SmoltcpTcpProxy {
         Ok(())
     }
 
-    fn poll_host_bridges(&mut self, std_now: StdInstant, tcp_config: &TcpProxyConfig) -> Result<()> {
+    fn poll_host_bridges(
+        &mut self,
+        std_now: StdInstant,
+        tcp_config: &TcpProxyConfig,
+    ) -> Result<()> {
         let ids = self.host_bridges.keys().cloned().collect::<Vec<_>>();
         let mut cleanup = Vec::new();
         for id in ids {
@@ -805,11 +819,7 @@ impl SmoltcpTcpProxy {
     }
 
     fn poll_host_udp_exposes(&mut self) -> Result<()> {
-        let tuples = self
-            .host_udp_exposes
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
+        let tuples = self.host_udp_exposes.keys().cloned().collect::<Vec<_>>();
         for tuple in tuples {
             let mut pending = Vec::new();
             let (handle, last_client) = {
@@ -820,7 +830,11 @@ impl SmoltcpTcpProxy {
                     match expose.socket.recv_from(&mut self.udp_buffer) {
                         Ok((len, src)) => {
                             expose.last_client = Some(src);
-                            pending.push((expose.handle, expose.remote, self.udp_buffer[..len].to_vec()));
+                            pending.push((
+                                expose.handle,
+                                expose.remote,
+                                self.udp_buffer[..len].to_vec(),
+                            ));
                         }
                         Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => break,
                         Err(_) => break,
@@ -855,7 +869,10 @@ impl SmoltcpTcpProxy {
         for _ in 0..1024 {
             let port = self.next_ephemeral_port;
             self.next_ephemeral_port = if port == 65535 { 49152 } else { port + 1 };
-            let used = self.host_bridges.values().any(|bridge| bridge.local_port == port)
+            let used = self
+                .host_bridges
+                .values()
+                .any(|bridge| bridge.local_port == port)
                 || self
                     .host_udp_exposes
                     .values()
@@ -918,7 +935,9 @@ fn parse_udp_ports(packet: &[u8], header_len: usize) -> Result<(u16, u16)> {
     Ok((src_port, dst_port))
 }
 
-fn parse_http_request(buffer: &[u8]) -> Result<Option<(String, String, Vec<u8>, usize)>> {
+type ParsedHttpRequest = (String, String, Vec<u8>, usize);
+
+fn parse_http_request(buffer: &[u8]) -> Result<Option<ParsedHttpRequest>> {
     let Some(header_end) = find_subsequence(buffer, b"\r\n\r\n") else {
         return Ok(None);
     };
@@ -960,7 +979,9 @@ fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
-fn build_api_response(result: Result<ApiResponse>) -> Result<Vec<u8>> {
+fn build_api_response(
+    result: std::result::Result<ApiResponse, HttpStatusError>,
+) -> Result<Vec<u8>> {
     match result {
         Ok(ApiResponse::Pong(body)) => Ok(http_response(200, body.as_bytes(), "text/plain")),
         Ok(ApiResponse::Ack) => Ok(http_response(200, b"ok", "text/plain")),
@@ -980,14 +1001,21 @@ fn build_api_response(result: Result<ApiResponse>) -> Result<Vec<u8>> {
             let json = serde_json::to_vec(&state)?;
             Ok(http_response(200, &json, "application/json"))
         }
-        Err(err) => Ok(http_response(500, err.to_string().as_bytes(), "text/plain")),
+        Err(err) => Ok(http_response(
+            err.status,
+            err.to_string().as_bytes(),
+            "text/plain",
+        )),
     }
 }
 
 fn http_response(status: u16, body: &[u8], content_type: &str) -> Vec<u8> {
     let reason = match status {
         200 => "OK",
+        400 => "Bad Request",
+        405 => "Method Not Allowed",
         404 => "Not Found",
+        500 => "Internal Server Error",
         _ => "Error",
     };
     let mut response = format!(
@@ -1006,7 +1034,7 @@ fn handle_api_socket(
     socket: &mut tcp::Socket,
     state: &mut ApiConnState,
     remote: IpAddr,
-    rx_buffer: &mut Vec<u8>,
+    rx_buffer: &mut [u8],
     service: &Arc<Mutex<ApiService>>,
 ) -> Result<()> {
     while socket.can_recv() {
@@ -1019,7 +1047,7 @@ fn handle_api_socket(
 
     if state.response.is_none() {
         if let Some((method, url, body, consumed)) = parse_http_request(&state.buffer)? {
-            let response = build_api_response(handle_http_request(
+            let response = build_api_response(handle_http_request_with_status(
                 &method,
                 &url,
                 &body,

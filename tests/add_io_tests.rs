@@ -1,6 +1,6 @@
 use wiretap_rs::add::{
-    AddClientArgs, AddServerArgs, build_add_client_plan_from_files,
-    build_add_server_plan_from_files,
+    build_add_client_plan_from_files, build_add_server_plan_from_files, AddClientArgs,
+    AddServerArgs,
 };
 
 #[test]

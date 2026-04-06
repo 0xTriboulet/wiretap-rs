@@ -83,8 +83,8 @@
 
 pub mod add;
 pub mod api;
-pub(crate) mod clipboard;
 pub mod cli;
+pub(crate) mod clipboard;
 pub mod constants;
 pub mod expose;
 pub mod logging;

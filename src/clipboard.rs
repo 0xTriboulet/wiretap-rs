@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::io::Write;
 use std::process::{Command, Stdio};
 

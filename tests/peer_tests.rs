@@ -1,5 +1,5 @@
-use wiretap_rs::peer::{Config, ConfigArgs, Key, PeerConfigArgs, parse_config};
-use wiretap_rs::peer::{PeerConfig, Shell, create_server_command};
+use wiretap_rs::peer::{create_server_command, PeerConfig, Shell};
+use wiretap_rs::peer::{parse_config, Config, ConfigArgs, Key, PeerConfigArgs};
 
 #[test]
 fn key_parses_base64_and_hex() {
@@ -78,25 +78,21 @@ PersistentKeepalive = 25\n";
 #[test]
 fn server_command_prefers_first_relay_addresses() {
     let mut relay = Config::new().expect("relay config");
-    relay
-        .add_address("172.17.1.2/32")
-        .expect("relay v4");
-    relay
-        .add_address("192.0.2.10/32")
-        .expect("api v4");
-    relay
-        .add_address("fd:17::2/128")
-        .expect("relay v6");
-    let mut args = PeerConfigArgs::default();
-    args.public_key = Some(relay.public_key().to_string());
-    relay
-        .add_peer(PeerConfig::from_args(args).expect("peer"));
+    relay.add_address("172.17.1.2/32").expect("relay v4");
+    relay.add_address("192.0.2.10/32").expect("api v4");
+    relay.add_address("fd:17::2/128").expect("relay v6");
+    let args = PeerConfigArgs {
+        public_key: Some(relay.public_key().to_string()),
+        ..Default::default()
+    };
+    relay.add_peer(PeerConfig::from_args(args).expect("peer"));
 
     let mut e2ee = Config::new().expect("e2ee config");
-    let mut e2ee_args = PeerConfigArgs::default();
-    e2ee_args.public_key = Some(e2ee.public_key().to_string());
-    e2ee
-        .add_peer(PeerConfig::from_args(e2ee_args).expect("e2ee peer"));
+    let e2ee_args = PeerConfigArgs {
+        public_key: Some(e2ee.public_key().to_string()),
+        ..Default::default()
+    };
+    e2ee.add_peer(PeerConfig::from_args(e2ee_args).expect("e2ee peer"));
 
     let cmd = create_server_command(&relay, &e2ee, Shell::Posix, true, false);
     assert!(cmd.contains("WIRETAP_RELAY_INTERFACE_IPV4=172.17.1.2"));

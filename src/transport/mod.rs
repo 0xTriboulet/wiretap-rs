@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::net::SocketAddr;
 use std::str::FromStr;
 
@@ -6,6 +6,7 @@ pub mod api;
 pub mod icmp;
 pub mod packet;
 pub mod smoltcp;
+pub mod socks5;
 pub mod tcp;
 pub mod udp;
 pub mod userspace;

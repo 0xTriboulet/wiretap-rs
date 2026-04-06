@@ -1,5 +1,5 @@
 use crate::transport::{FlowTuple, TransportProtocol};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use ipnet::IpNet;
 use std::net::{IpAddr, SocketAddr};
 

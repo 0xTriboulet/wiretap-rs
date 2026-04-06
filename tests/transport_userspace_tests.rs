@@ -2,8 +2,8 @@ use ipnet::IpNet;
 use std::net::IpAddr;
 use wiretap_rs::peer::{PeerConfig, PeerConfigArgs};
 use wiretap_rs::transport::userspace::{
-    NullBind, Packet, PacketRouter, Route, UserspaceStack, WireguardPacket, packet_to_flow,
-    parse_ip_header,
+    packet_to_flow, parse_ip_header, NullBind, Packet, PacketRouter, Route, UserspaceStack,
+    WireguardPacket,
 };
 use wiretap_rs::transport::{FlowTuple, TransportProtocol};
 
@@ -155,10 +155,12 @@ fn userspace_routes_packet_to_peer_endpoint() {
     packet[18] = 0;
     packet[19] = 2;
 
-    let mut args = PeerConfigArgs::default();
-    args.public_key = Some("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=".to_string());
-    args.allowed_ips = vec!["10.0.0.0/24".to_string()];
-    args.endpoint = Some("203.0.113.1:51820".to_string());
+    let args = PeerConfigArgs {
+        public_key: Some("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=".to_string()),
+        allowed_ips: vec!["10.0.0.0/24".to_string()],
+        endpoint: Some("203.0.113.1:51820".to_string()),
+        ..Default::default()
+    };
     let peer = PeerConfig::from_args(args).expect("peer");
 
     let mut stack = UserspaceStack::new(NullBind::default()).expect("stack");
@@ -185,10 +187,12 @@ fn userspace_send_packet_uses_peer_endpoint() {
     packet[18] = 0;
     packet[19] = 2;
 
-    let mut args = PeerConfigArgs::default();
-    args.public_key = Some("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=".to_string());
-    args.allowed_ips = vec!["10.0.0.0/24".to_string()];
-    args.endpoint = Some("203.0.113.5:51820".to_string());
+    let args = PeerConfigArgs {
+        public_key: Some("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=".to_string()),
+        allowed_ips: vec!["10.0.0.0/24".to_string()],
+        endpoint: Some("203.0.113.5:51820".to_string()),
+        ..Default::default()
+    };
     let peer = PeerConfig::from_args(args).expect("peer");
 
     let bind = NullBind::default();

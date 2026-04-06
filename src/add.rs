@@ -1,9 +1,9 @@
 use crate::constants;
 use crate::peer::{
-    Config, PeerConfigArgs, Shell, create_server_command, create_server_file,
-    next_prefix_for_peers, parse_config,
+    create_server_command, create_server_file, next_prefix_for_peers, parse_config, Config,
+    PeerConfigArgs, Shell,
 };
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use ipnet::IpNet;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -325,9 +325,11 @@ pub fn build_add_server_plan(
         IpAddr::V6(addr) => format!("{}/128", addr),
     });
 
-    let mut client_peer_args = PeerConfigArgs::default();
-    client_peer_args.public_key = Some(server_e2ee.public_key().to_string());
-    client_peer_args.allowed_ips = new_allowed_strs;
+    let mut client_peer_args = PeerConfigArgs {
+        public_key: Some(server_e2ee.public_key().to_string()),
+        allowed_ips: new_allowed_strs,
+        ..Default::default()
+    };
     if let Some(nickname) = &args.nickname {
         client_peer_args.nickname = Some(nickname.clone());
     }
@@ -449,9 +451,11 @@ pub fn build_add_client_plan_with_api(
         .iter()
         .map(|net| net.to_string())
         .collect::<Vec<_>>();
-    let mut relay_peer_args = PeerConfigArgs::default();
-    relay_peer_args.public_key = Some(client_relay.public_key().to_string());
-    relay_peer_args.allowed_ips = relay_allowed;
+    let mut relay_peer_args = PeerConfigArgs {
+        public_key: Some(client_relay.public_key().to_string()),
+        allowed_ips: relay_allowed,
+        ..Default::default()
+    };
     if args.outbound_endpoint.is_none() {
         if let Some(endpoint) = &args.endpoint {
             relay_peer_args.endpoint = Some(endpoint.clone());
@@ -465,9 +469,11 @@ pub fn build_add_client_plan_with_api(
         .iter()
         .map(|net| net.to_string())
         .collect::<Vec<_>>();
-    let mut e2ee_peer_args = PeerConfigArgs::default();
-    e2ee_peer_args.public_key = Some(client_e2ee.public_key().to_string());
-    e2ee_peer_args.allowed_ips = e2ee_allowed;
+    let mut e2ee_peer_args = PeerConfigArgs {
+        public_key: Some(client_e2ee.public_key().to_string()),
+        allowed_ips: e2ee_allowed,
+        ..Default::default()
+    };
     if let Some(addr) = client_e2ee.addresses().first() {
         e2ee_peer_args.endpoint = Some(format!("{}:{}", addr.addr(), constants::DEFAULT_E2EE_PORT));
     }
@@ -574,23 +580,27 @@ pub fn build_add_server_plan_with_api(
         .collect::<Vec<_>>();
     new_allowed_strs.push(api_cidr);
 
-    let mut client_peer_args = PeerConfigArgs::default();
-    client_peer_args.public_key = Some(server_e2ee.public_key().to_string());
-    client_peer_args.allowed_ips = new_allowed_strs;
-    client_peer_args.endpoint = Some(format!(
-        "{}:{}",
-        allocation.next_server_relay_addr4,
-        constants::DEFAULT_E2EE_PORT
-    ));
+    let mut client_peer_args = PeerConfigArgs {
+        public_key: Some(server_e2ee.public_key().to_string()),
+        allowed_ips: new_allowed_strs,
+        endpoint: Some(format!(
+            "{}:{}",
+            allocation.next_server_relay_addr4,
+            constants::DEFAULT_E2EE_PORT
+        )),
+        ..Default::default()
+    };
     if let Some(nickname) = &args.nickname {
         client_peer_args.nickname = Some(nickname.clone());
     }
     client_e2ee.add_peer(crate::peer::PeerConfig::from_args(client_peer_args)?);
 
-    let mut server_relay_peer_args = PeerConfigArgs::default();
-    server_relay_peer_args.public_key = Some(server_relay.public_key().to_string());
-    server_relay_peer_args.allowed_ips = relay_address_strings.clone();
-    server_relay_peer_args.endpoint = args.outbound_endpoint.clone();
+    let mut server_relay_peer_args = PeerConfigArgs {
+        public_key: Some(server_relay.public_key().to_string()),
+        allowed_ips: relay_address_strings.clone(),
+        endpoint: args.outbound_endpoint.clone(),
+        ..Default::default()
+    };
     if args.outbound_endpoint.is_some() {
         server_relay_peer_args.persistent_keepalive = Some(args.keepalive);
     }

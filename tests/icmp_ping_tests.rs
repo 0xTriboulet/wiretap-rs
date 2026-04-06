@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use wiretap_rs::transport::icmp::{Ping, handle_icmp_packet_with_ping};
+use wiretap_rs::transport::icmp::{handle_icmp_packet_with_ping, Ping};
 use wiretap_rs::transport::packet::build_ipv4_header;
 
 struct AlwaysFailPing;

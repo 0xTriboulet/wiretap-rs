@@ -61,6 +61,9 @@ pub const DEFAULT_KEEPALIVE_INTERVAL_SECS: u64 = 60;
 /// Default number of TCP keepalive probes before giving up.
 pub const DEFAULT_KEEPALIVE_COUNT: u32 = 3;
 
+/// Default UDP connection idle timeout in seconds.
+pub const DEFAULT_UDP_TIMEOUT_SECS: u64 = 60;
+
 /// Number of bits in the subnet mask for IPv4 allocations.
 pub const SUBNET_V4_BITS: u8 = 24;
 
@@ -451,4 +454,24 @@ pub fn increment_v4(base: Ipv4Addr, delta: u32) -> Ipv4Addr {
 pub fn increment_v6(base: Ipv6Addr, delta: u128) -> Ipv6Addr {
     let value = u128::from(base).saturating_add(delta);
     Ipv6Addr::from(value)
+}
+
+/// Applies an IPv4 network prefix mask and returns the masked address.
+pub fn mask_prefix_v4(addr: Ipv4Addr, prefix: u8) -> Ipv4Addr {
+    let mask = if prefix == 0 {
+        0
+    } else {
+        u32::MAX << (32 - prefix as u32)
+    };
+    Ipv4Addr::from(u32::from(addr) & mask)
+}
+
+/// Applies an IPv6 network prefix mask and returns the masked address.
+pub fn mask_prefix_v6(addr: Ipv6Addr, prefix: u8) -> Ipv6Addr {
+    let mask = if prefix == 0 {
+        0
+    } else {
+        u128::MAX << (128 - prefix as u32)
+    };
+    Ipv6Addr::from(u128::from(addr) & mask)
 }

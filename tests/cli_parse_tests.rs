@@ -120,6 +120,19 @@ fn parse_serve_with_api_overrides() {
 }
 
 #[test]
+fn parse_serve_udp_timeout_override() {
+    let cli =
+        Cli::try_parse_from(["wiretap", "serve", "--udp-timeout", "17"]).expect("parse serve");
+
+    match cli.command {
+        Some(Command::Serve(args)) => {
+            assert_eq!(args.udp_timeout_secs, 17);
+        }
+        _ => panic!("expected serve command"),
+    }
+}
+
+#[test]
 fn parse_serve_quiet_flag() {
     let cli = Cli::try_parse_from(["wiretap", "serve", "--quiet"]).expect("parse serve quiet");
 

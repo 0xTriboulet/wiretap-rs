@@ -1,4 +1,4 @@
-use wiretap_rs::add::{AddServerArgs, build_add_server_plan_with_api, resolve_server_address};
+use wiretap_rs::add::{build_add_server_plan_with_api, resolve_server_address, AddServerArgs};
 use wiretap_rs::peer::parse_config;
 use wiretap_rs::transport::api::NetworkState;
 
@@ -67,18 +67,16 @@ AllowedIPs = 172.16.0.0/16,fd:16::/40\n";
 
     assert!(plan.plan.client_e2ee_update.contains("10.0.1.0/24"));
     assert!(plan.plan.client_e2ee_update.contains("::3/128"));
-    assert!(
-        plan.plan
-            .client_e2ee_update
-            .contains("Endpoint = 172.17.0.3:51821")
-    );
+    assert!(plan
+        .plan
+        .client_e2ee_update
+        .contains("Endpoint = 172.17.0.3:51821"));
     assert!(plan.plan.server_relay_config.contains("IPv4 = 172.17.0.3"));
     assert!(plan.plan.server_relay_config.contains("IPv6 = fd:17::3"));
-    assert!(
-        plan.plan
-            .server_relay_config
-            .contains("Endpoint = 10.0.0.2:51820")
-    );
+    assert!(plan
+        .plan
+        .server_relay_config
+        .contains("Endpoint = 10.0.0.2:51820"));
 }
 
 #[test]

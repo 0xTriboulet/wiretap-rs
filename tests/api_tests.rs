@@ -52,8 +52,8 @@ where
             if reader.read_line(&mut request_line).unwrap_or(0) == 0 {
                 return;
             }
-            let parts: Vec<&str> = request_line.trim_end().split_whitespace().collect();
-            let method = parts.get(0).unwrap_or(&"").to_string();
+            let parts: Vec<&str> = request_line.split_whitespace().collect();
+            let method = parts.first().unwrap_or(&"").to_string();
             let path = parts.get(1).unwrap_or(&"").to_string();
 
             let mut headers = HashMap::new();

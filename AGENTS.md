@@ -52,7 +52,7 @@ Agents should use the following commands to build, test, and manage the project.
 Adhere to these rules when making changes, especially during the porting process:
 
 *   **Idiomatic Rust:** Translate Go patterns to idiomatic Rust (e.g., Go `goroutine` -> Rust `tokio::spawn`; Go `interface` -> Rust `trait`/generics). Do not simply write Go code in Rust syntax.
-*   **Testing First:** Ensure comprehensive tests exist for the original Go functionality and use a test-driven approach when porting components. New Rust code must maintain or improve test coverage. Tests should be run frequently.
+*   **Testing First:** Ensure comprehensive tests exist for the original Go functionality and use a test-driven approach when porting components. You *MUST* implement a test first, then watch the test fail, and then implement code that passes the test. New Rust code must maintain or improve test coverage. Tests should be run frequently.
 *   **Incremental Porting:** The project uses a "Go sandwich" or similar approach to port code incrementally. New features should be implemented in Rust where possible.
 *   **Error Handling:** Use Rust's robust error handling mechanisms (`Result` and `Option`) instead of Go's multi-value return style.
 *   **Concurrency:** Use `tokio` for asynchronous I/O-bound tasks.
