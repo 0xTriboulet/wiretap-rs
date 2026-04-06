@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::net::{SocketAddr, UdpSocket};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs};
 
@@ -7,7 +7,7 @@ mod packet;
 mod router;
 
 pub use bind::{NullBind, UdpBind, WireguardBind, WireguardPacket};
-pub use packet::{IpHeader, ip_header_len, packet_to_flow, parse_ip_header};
+pub use packet::{ip_header_len, packet_to_flow, parse_ip_header, IpHeader};
 pub use router::{Packet, PacketRouter, Route};
 
 #[derive(Debug)]
@@ -56,7 +56,7 @@ impl<B: WireguardBind> UserspaceStack<B> {
             }
             for allowed in peer.allowed_ips() {
                 self.router.add_route(Route {
-                    destination: allowed.clone(),
+                    destination: *allowed,
                     next_hop: None,
                     peer_endpoint: endpoint,
                 });

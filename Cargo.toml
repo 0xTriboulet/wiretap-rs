@@ -11,6 +11,10 @@ license = "MIT"
 keywords = ["wireguard", "proxy", "vpn", "tunnel", "network"]
 categories = ["network-programming", "command-line-utilities"]
 
+[lib]
+name = "wiretap_rs"
+crate-type = ["rlib", "staticlib", "cdylib"]
+
 [dependencies]
 anyhow = "1.0"
 base64 = "0.22"

@@ -36,7 +36,7 @@ use crate::peer::{Config, PeerConfig};
 use crate::transport::api::{
     AddAllowedIpsRequest, HostInterface, InterfaceType, NetworkState, PeerType, ServerConfigs,
 };
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::net::{IpAddr, SocketAddr};
@@ -77,13 +77,13 @@ struct ExposeTupleDto {
 pub struct ExposeRule {
     /// The remote IP address where the port is exposed.
     pub remote_addr: IpAddr,
-    
+
     /// The local port on the client (None for dynamic SOCKS5 exposure).
     pub local_port: Option<u16>,
-    
+
     /// The remote port number being exposed.
     pub remote_port: u16,
-    
+
     /// The protocol being exposed ("tcp", "udp", or "dynamic").
     pub protocol: String,
 }
@@ -202,7 +202,7 @@ pub fn expose(
 /// let rules = expose_list(api_addr)?;
 ///
 /// for rule in rules {
-///     println!("{}:{} -> {:?}:{}", 
+///     println!("{}:{} -> {:?}:{}",
 ///         rule.protocol, rule.remote_port, rule.local_port, rule.remote_addr);
 /// }
 /// # Ok(())

@@ -3,7 +3,7 @@ use std::net::TcpListener;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use wiretap_rs::peer::Config;
-use wiretap_rs::transport::api::{ApiService, run_http_api};
+use wiretap_rs::transport::api::{run_http_api, ApiService};
 
 fn unique_temp_dir() -> std::path::PathBuf {
     let mut dir = std::env::temp_dir();

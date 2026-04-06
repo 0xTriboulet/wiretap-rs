@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use wiretap_rs::serve::delete_config_file;
-use wiretap_rs::serve::{ServeOptions, ServerEnv, apply_serve_options, load_server_config};
+use wiretap_rs::serve::{apply_serve_options, load_server_config, ServeOptions, ServerEnv};
 
 #[test]
 fn load_server_config_prefers_file() {

@@ -1,7 +1,7 @@
 use crate::transport::packet::{
     build_ipv4_header, build_ipv6_header, checksum, icmpv6_checksum, parse_ip_packet,
 };
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::net::IpAddr;
 use std::process::Command;
 use std::time::Duration;

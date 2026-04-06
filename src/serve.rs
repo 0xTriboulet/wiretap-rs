@@ -1,8 +1,9 @@
 use crate::constants;
-use crate::peer::{Config, PeerConfigArgs, ServerConfig, parse_server_config};
-use crate::transport::api::{ApiService, ExposeCommand, ExposeTuple, run_http_api};
+use crate::peer::{parse_server_config, Config, PeerConfigArgs, ServerConfig};
+use crate::transport::api::{run_http_api, ApiService, ExposeCommand, ExposeTuple};
 use crate::transport::smoltcp::{SmoltcpTcpProxy, TcpProxyConfig};
-use crate::transport::userspace::{UdpBind, UserspaceStack, WireguardBind, resolve_peer_endpoint};
+use crate::transport::socks5;
+use crate::transport::userspace::{resolve_peer_endpoint, UdpBind, UserspaceStack, WireguardBind};
 use crate::transport::wireguard::{
     MultiPeerSession, MultiPeerTunnel, OutboundDatagram, PeerConfig as WgPeerConfig,
 };
@@ -10,9 +11,8 @@ use crate::transport::{
     icmp,
     packet::{build_udp_packet, parse_ip_packet, parse_udp_packet},
 };
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::collections::HashMap;
-use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,6 +34,7 @@ pub struct ServeOptions {
     pub keepalive_idle_secs: u64,
     pub keepalive_interval_secs: u64,
     pub keepalive_count: u32,
+    pub udp_timeout_secs: u64,
     pub allocation_state_path: Option<PathBuf>,
 }
 
@@ -52,6 +53,7 @@ impl Default for ServeOptions {
             keepalive_idle_secs: constants::DEFAULT_KEEPALIVE_IDLE_SECS,
             keepalive_interval_secs: constants::DEFAULT_KEEPALIVE_INTERVAL_SECS,
             keepalive_count: constants::DEFAULT_KEEPALIVE_COUNT,
+            udp_timeout_secs: constants::DEFAULT_UDP_TIMEOUT_SECS,
             allocation_state_path: None,
         }
     }
@@ -90,9 +92,7 @@ impl From<HashMap<String, String>> for ServerEnv {
     }
 }
 
-pub(crate) fn resolve_allocation_state_path(
-    env: &ServerEnv,
-) -> Option<PathBuf> {
+pub(crate) fn resolve_allocation_state_path(env: &ServerEnv) -> Option<PathBuf> {
     if let Some(value) = env.get("WIRETAP_ALLOCATION_STATE") {
         let trimmed = value.trim();
         if !trimmed.is_empty() {
@@ -140,13 +140,15 @@ pub fn load_server_config(file_contents: Option<&str>, env: &ServerEnv) -> Resul
         .get("WIRETAP_RELAY_PEER_ALLOWED")
         .ok_or_else(|| anyhow!("missing WIRETAP_RELAY_PEER_ALLOWED"))?;
 
-    let mut relay_peer_args = PeerConfigArgs::default();
-    relay_peer_args.public_key = Some(relay_peer_public.to_string());
-    relay_peer_args.allowed_ips = relay_peer_allowed
-        .split(',')
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .collect();
+    let mut relay_peer_args = PeerConfigArgs {
+        public_key: Some(relay_peer_public.to_string()),
+        allowed_ips: relay_peer_allowed
+            .split(',')
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .collect(),
+        ..Default::default()
+    };
     if let Some(endpoint) = env.get("WIRETAP_RELAY_PEER_ENDPOINT") {
         relay_peer_args.endpoint = Some(endpoint.to_string());
     }
@@ -171,8 +173,10 @@ pub fn load_server_config(file_contents: Option<&str>, env: &ServerEnv) -> Resul
     let e2ee_peer_public = env
         .get("WIRETAP_E2EE_PEER_PUBLICKEY")
         .ok_or_else(|| anyhow!("missing WIRETAP_E2EE_PEER_PUBLICKEY"))?;
-    let mut e2ee_peer_args = PeerConfigArgs::default();
-    e2ee_peer_args.public_key = Some(e2ee_peer_public.to_string());
+    let mut e2ee_peer_args = PeerConfigArgs {
+        public_key: Some(e2ee_peer_public.to_string()),
+        ..Default::default()
+    };
     if let Some(endpoint) = env.get("WIRETAP_E2EE_PEER_ENDPOINT") {
         e2ee_peer_args.endpoint = Some(endpoint.to_string());
     }
@@ -366,10 +370,7 @@ pub fn apply_serve_options(
             _ => false,
         });
         if !has_e2ee_v4 {
-            e2ee.add_address(&format!(
-                "{}/32",
-                constants::default_server_e2ee_v4()
-            ))?;
+            e2ee.add_address(&format!("{}/32", constants::default_server_e2ee_v4()))?;
         }
         if !options.disable_ipv6 {
             let has_e2ee_v6 = e2ee.addresses().iter().any(|net| match net.addr() {
@@ -377,10 +378,7 @@ pub fn apply_serve_options(
                 _ => false,
             });
             if !has_e2ee_v6 {
-                e2ee.add_address(&format!(
-                    "{}/128",
-                    constants::default_server_e2ee_v6()
-                ))?;
+                e2ee.add_address(&format!("{}/128", constants::default_server_e2ee_v6()))?;
             }
         }
     }
@@ -508,8 +506,10 @@ fn strip_ipv6(config: Config) -> Result<Config> {
             .filter(|net| net.addr().is_ipv4())
             .map(|net| net.to_string())
             .collect::<Vec<_>>();
-        let mut args = PeerConfigArgs::default();
-        args.public_key = Some(peer.public_key().to_string());
+        let mut args = PeerConfigArgs {
+            public_key: Some(peer.public_key().to_string()),
+            ..Default::default()
+        };
         if let Some(endpoint) = peer.endpoint() {
             args.endpoint = Some(endpoint.to_string());
         } else if let Some(endpoint) = peer.endpoint_dns() {
@@ -672,6 +672,7 @@ pub fn run_wireguard_smoltcp_with_tunnel(
     let localhost_ip = localhost_mapping(config, options);
     let tcp_config = tcp_proxy_config(options);
     let mut tcp_proxy = SmoltcpTcpProxy::new_with_config(&addresses, localhost_ip, tcp_config)?;
+    tcp_proxy.set_udp_idle_timeout(std::time::Duration::from_secs(options.udp_timeout_secs));
     if let Some(service) = api_service {
         if let Ok(mut svc) = service.lock() {
             svc.set_expose_tx(expose_tx);
@@ -775,6 +776,7 @@ fn run_e2ee_smoltcp_with_tunnel(
     let localhost_ip = localhost_mapping(config, options);
     let tcp_config = tcp_proxy_config(options);
     let mut tcp_proxy = SmoltcpTcpProxy::new_with_config(&addresses, localhost_ip, tcp_config)?;
+    tcp_proxy.set_udp_idle_timeout(std::time::Duration::from_secs(options.udp_timeout_secs));
     if let Some(service) = api_service {
         if let Ok(mut svc) = service.lock() {
             svc.set_expose_tx(expose_tx);
@@ -948,7 +950,13 @@ impl ExposeManager {
         let bridge_tx = self.bridge_tx.clone();
         let listener_tuple = tuple.clone();
         let thread = std::thread::spawn(move || {
-            run_expose_tcp_listener(listener, listener_tuple, dynamic, bridge_tx, shutdown_handle);
+            run_expose_tcp_listener(
+                listener,
+                listener_tuple,
+                dynamic,
+                bridge_tx,
+                shutdown_handle,
+            );
         });
 
         self.tcp_listeners
@@ -985,11 +993,10 @@ fn run_expose_tcp_listener(
                 let remote = if dynamic {
                     match socks5_request_port(&mut stream) {
                         Some(port) => {
-                            let _ = send_socks_reply(&mut stream, 0x00);
+                            let _ = socks5::send_reply(&mut stream, 0x00);
                             SocketAddr::new(tuple.remote_addr, port)
                         }
                         None => {
-                            let _ = send_socks_reply(&mut stream, 0x01);
                             continue;
                         }
                     }
@@ -1010,71 +1017,7 @@ fn run_expose_tcp_listener(
 }
 
 fn socks5_request_port(stream: &mut TcpStream) -> Option<u16> {
-    let ver = read_u8(stream)?;
-    if ver != 0x05 {
-        return None;
-    }
-    let nmethods = read_u8(stream)?;
-    let methods = read_exact(stream, nmethods as usize)?;
-    if !methods.iter().any(|m| *m == 0x00) {
-        let _ = stream.write_all(&[0x05, 0xFF]);
-        return None;
-    }
-    if stream.write_all(&[0x05, 0x00]).is_err() {
-        return None;
-    }
-
-    let ver = read_u8(stream)?;
-    if ver != 0x05 {
-        return None;
-    }
-    let cmd = read_u8(stream)?;
-    let _rsv = read_u8(stream)?;
-    let atyp = read_u8(stream)?;
-    if cmd != 0x01 {
-        let _ = send_socks_reply(stream, 0x07);
-        return None;
-    }
-    if !discard_socks_addr(stream, atyp) {
-        let _ = send_socks_reply(stream, 0x08);
-        return None;
-    }
-    read_u16(stream)
-}
-
-fn discard_socks_addr(stream: &mut TcpStream, atyp: u8) -> bool {
-    match atyp {
-        0x01 => read_exact(stream, 4).is_some(),
-        0x03 => match read_u8(stream) {
-            Some(len) => read_exact(stream, len as usize).is_some(),
-            None => false,
-        },
-        0x04 => read_exact(stream, 16).is_some(),
-        _ => false,
-    }
-}
-
-fn send_socks_reply(stream: &mut TcpStream, code: u8) -> std::io::Result<()> {
-    let reply = [0x05, code, 0x00, 0x01, 0, 0, 0, 0, 0, 0];
-    stream.write_all(&reply)
-}
-
-fn read_u8(stream: &mut TcpStream) -> Option<u8> {
-    let mut buf = [0u8; 1];
-    stream.read_exact(&mut buf).ok()?;
-    Some(buf[0])
-}
-
-fn read_u16(stream: &mut TcpStream) -> Option<u16> {
-    let mut buf = [0u8; 2];
-    stream.read_exact(&mut buf).ok()?;
-    Some(u16::from_be_bytes(buf))
-}
-
-fn read_exact(stream: &mut TcpStream, len: usize) -> Option<Vec<u8>> {
-    let mut buf = vec![0u8; len];
-    stream.read_exact(&mut buf).ok()?;
-    Some(buf)
+    socks5::parse_connect_port(stream)
 }
 
 fn collect_smoltcp_addresses(config: &ServerConfig, options: &ServeOptions) -> Vec<IpAddr> {
@@ -1118,9 +1061,7 @@ fn localhost_mapping(config: &ServerConfig, options: &ServeOptions) -> Option<Ip
 }
 
 fn api_localhost_mapping(config: &ServerConfig, options: &ServeOptions) -> Option<Ipv4Addr> {
-    if config.e2ee.is_none() {
-        return None;
-    }
+    config.e2ee.as_ref()?;
     let bind = api_bind_addr(config, options)?;
     match bind.ip() {
         IpAddr::V4(ip) => Some(ip),
@@ -1279,11 +1220,25 @@ pub fn build_relay_tunnel(
 #[cfg(test)]
 mod tests {
     use super::{
-        ServeOptions, api_bind_addr, collect_smoltcp_addresses, localhost_mapping,
-        resolve_allocation_state_path,
+        api_bind_addr, collect_smoltcp_addresses, localhost_mapping, resolve_allocation_state_path,
+        run_expose_tcp_listener, socks5_request_port, ServeOptions, TcpBridgeRequest,
     };
     use crate::peer::{Config, ServerConfig};
-    use std::net::{IpAddr, Ipv4Addr};
+    use crate::transport::api::ExposeTuple;
+    use std::io::{Read, Write};
+    use std::net::{IpAddr, Ipv4Addr, TcpListener, TcpStream};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+    use std::sync::Arc;
+
+    fn connected_stream_pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let client = std::thread::spawn(move || TcpStream::connect(addr).expect("connect"));
+        let (server, _) = listener.accept().expect("accept");
+        let client = client.join().expect("join");
+        (server, client)
+    }
 
     #[test]
     fn api_bind_addr_prefers_ipv4_when_ipv6_disabled() {
@@ -1352,5 +1307,164 @@ mod tests {
         let path = resolve_allocation_state_path(&env);
         let expected = std::path::PathBuf::from("/tmp/wiretap_state.json");
         assert_eq!(path.unwrap(), expected);
+    }
+
+    #[test]
+    fn socks5_request_port_accepts_connect_command() {
+        let (mut server, mut client) = connected_stream_pair();
+        client
+            .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+            .expect("timeout");
+
+        let task = std::thread::spawn(move || socks5_request_port(&mut server));
+
+        let target_port = 0x1F90u16; // 8080
+        let request = [
+            0x05,
+            0x01,
+            0x00, // greeting (no auth)
+            0x05,
+            0x01,
+            0x00,
+            0x01, // connect, reserved, ipv4
+            1,
+            2,
+            3,
+            4, // dst addr
+            (target_port >> 8) as u8,
+            (target_port & 0xFF) as u8,
+        ];
+        client.write_all(&request).expect("write request");
+
+        let mut greeting = [0u8; 2];
+        client
+            .read_exact(&mut greeting)
+            .expect("read greeting reply");
+        assert_eq!(greeting, [0x05, 0x00]);
+
+        assert_eq!(task.join().expect("join"), Some(target_port));
+    }
+
+    #[test]
+    fn socks5_request_port_rejects_non_connect_command() {
+        let (mut server, mut client) = connected_stream_pair();
+        client
+            .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+            .expect("timeout");
+
+        let task = std::thread::spawn(move || socks5_request_port(&mut server));
+        let request = [
+            0x05, 0x01, 0x00, // greeting (no auth)
+            0x05, 0x02, 0x00, 0x01, // bind command, reserved, ipv4
+        ];
+        client.write_all(&request).expect("write request");
+
+        let mut greeting = [0u8; 2];
+        client
+            .read_exact(&mut greeting)
+            .expect("read greeting reply");
+        assert_eq!(greeting, [0x05, 0x00]);
+
+        let mut failure = [0u8; 10];
+        client.read_exact(&mut failure).expect("read failure reply");
+        assert_eq!(failure[0], 0x05);
+        assert_eq!(failure[1], 0x07);
+        assert_eq!(task.join().expect("join"), None);
+    }
+
+    #[test]
+    fn socks5_request_port_rejects_invalid_address_type() {
+        let (mut server, mut client) = connected_stream_pair();
+        client
+            .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+            .expect("timeout");
+
+        let task = std::thread::spawn(move || socks5_request_port(&mut server));
+        let request = [
+            0x05, 0x01, 0x00, // greeting (no auth)
+            0x05, 0x01, 0x00, 0x7F, // connect, reserved, unsupported atyp
+        ];
+        client.write_all(&request).expect("write request");
+
+        let mut greeting = [0u8; 2];
+        client
+            .read_exact(&mut greeting)
+            .expect("read greeting reply");
+        assert_eq!(greeting, [0x05, 0x00]);
+
+        let mut failure = [0u8; 10];
+        client.read_exact(&mut failure).expect("read failure reply");
+        assert_eq!(failure[0], 0x05);
+        assert_eq!(failure[1], 0x08);
+        assert_eq!(task.join().expect("join"), None);
+    }
+
+    #[test]
+    fn run_expose_tcp_listener_dynamic_does_not_send_duplicate_failure_reply() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let addr = listener.local_addr().expect("local addr");
+
+        let tuple = ExposeTuple {
+            remote_addr: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            local_port: 8080,
+            remote_port: addr.port(),
+            protocol: "tcp".to_string(),
+        };
+
+        let (bridge_tx, bridge_rx) = mpsc::channel::<TcpBridgeRequest>();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let listener_shutdown = shutdown.clone();
+        let handle = std::thread::spawn(move || {
+            run_expose_tcp_listener(listener, tuple, true, bridge_tx, listener_shutdown);
+        });
+
+        let mut client = TcpStream::connect(addr).expect("connect");
+        client
+            .set_read_timeout(Some(std::time::Duration::from_millis(800)))
+            .expect("read timeout");
+
+        client
+            .write_all(&[
+                0x05, 0x01, 0x00, // greeting
+                0x05, 0x02, 0x00, 0x01, // non-CONNECT command
+                1, 2, 3, 4, // address bytes
+                0, 80, // port bytes
+            ])
+            .expect("write request");
+
+        let mut greeting = [0u8; 2];
+        client.read_exact(&mut greeting).expect("greeting");
+        assert_eq!(greeting, [0x05, 0x00]);
+
+        let mut failure = [0u8; 10];
+        client.read_exact(&mut failure).expect("failure");
+        assert_eq!(failure[0], 0x05);
+        assert_eq!(failure[1], 0x07);
+
+        let mut extra = [0u8; 1];
+        let extra_read = client.read(&mut extra);
+        let got_extra_reply = match &extra_read {
+            Ok(0) => false,
+            Ok(_) => true,
+            Err(err) => !matches!(
+                err.kind(),
+                std::io::ErrorKind::WouldBlock
+                    | std::io::ErrorKind::TimedOut
+                    | std::io::ErrorKind::ConnectionReset
+            ),
+        };
+        assert!(
+            !got_extra_reply,
+            "unexpected extra SOCKS5 reply bytes: {:?}",
+            extra_read
+        );
+
+        assert!(
+            bridge_rx.try_recv().is_err(),
+            "bridge request should not be emitted"
+        );
+        shutdown.store(true, Ordering::Relaxed);
+        handle.join().expect("join listener");
     }
 }

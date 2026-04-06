@@ -1,6 +1,6 @@
 use ipnet::IpNet;
 use std::net::IpAddr;
-use wiretap_rs::status::{StatusSummary, load_status_summary, split_routes_and_api};
+use wiretap_rs::status::{load_status_summary, split_routes_and_api, StatusSummary};
 
 #[test]
 fn split_routes_and_api_uses_last_allowed_ip_as_api() {

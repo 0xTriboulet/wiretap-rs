@@ -34,7 +34,7 @@
 //! ```
 
 use crate::peer::parse_config;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::net::{IpAddr, SocketAddr};
 
 /// A validated port exposure request.
@@ -44,19 +44,19 @@ use std::net::{IpAddr, SocketAddr};
 pub struct ExposeRequest {
     /// List of API addresses to send the exposure request to.
     pub api_addrs: Vec<IpAddr>,
-    
+
     /// Port number of the API endpoint.
     pub api_port: u16,
-    
+
     /// Local port to expose (None for dynamic SOCKS5).
     pub local_port: Option<u16>,
-    
+
     /// Remote port number on the server.
     pub remote_port: u16,
-    
+
     /// Protocol: "tcp", "udp", or "dynamic" for SOCKS5.
     pub protocol: String,
-    
+
     /// Whether this is a dynamic SOCKS5 proxy.
     pub dynamic: bool,
 }
@@ -66,10 +66,10 @@ pub struct ExposeRequest {
 pub enum ExposeMode {
     /// Create a new port exposure.
     Expose,
-    
+
     /// List existing port exposures.
     List,
-    
+
     /// Remove an existing port exposure.
     Remove,
 }
